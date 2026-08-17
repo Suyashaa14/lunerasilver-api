@@ -1,0 +1,43 @@
+{
+  "name": "lunerasilver-api",
+  "version": "1.0.0",
+  "main": "dist/app.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
+    "link-migrations": "node ./scripts/link-migrations.js",
+    "migrate": "npm run link-migrations && knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback": "npm run link-migrations && knex migrate:rollback --knexfile knexfile.ts",
+    "migrate:list": "npm run link-migrations && knex migrate:list --knexfile knexfile.ts",
+    "seed": "knex seed:run --knexfile knexfile.ts"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cloudinary": "^2.7.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.1",
+    "express": "^4.21.1",
+    "express-validator": "^7.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "knex": "^3.1.0",
+    "multer": "^2.0.1",
+    "mysql2": "^3.14.1",
+    "node-cron": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/cookie-parser": "^1.4.7",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.14.1",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.8.3"
+  }
+}

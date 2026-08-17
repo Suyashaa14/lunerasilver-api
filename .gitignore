@@ -1,0 +1,23 @@
+# Node.js
+node_modules/
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+dist/
+
+# Root migrations (generated from src/modules/*/migrations by link-migrations)
+/migrations/
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
