@@ -1,12 +1,12 @@
 import express from "express";
 import * as controller from "./controller.sales";
 import { createSaleValidator, updateSaleValidator } from "./validator.sales";
-import { authenticateUser, authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 
 const router = express.Router();
 
-router.use(authenticateUser, authenticateAdmin);
+router.use(authenticateAdmin);
 
 router.get("/", asyncHandler(controller.listSales));
 router.get("/summary", asyncHandler(controller.getSummary));

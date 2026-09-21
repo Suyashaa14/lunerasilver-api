@@ -1,5 +1,5 @@
 import db from "../../utils/db";
-import * as salesProvider from "../sales/provider.sales";
+import * as invoicesProvider from "../invoices/provider.invoices";
 import * as expensesProvider from "../expenses/provider.expenses";
 
 export const getStats = async () => {
@@ -60,9 +60,9 @@ export const getAlerts = async (): Promise<Alert[]> => {
   const staleCutoff = new Date(now.getTime() - STALE_STOCK_DAYS * 24 * 60 * 60 * 1000);
 
   const [salesMonthly, expensesMonthly, byProduct, categoryStockRows, staleRow] = await Promise.all([
-    salesProvider.getMonthlySeries({}),
+    invoicesProvider.getMonthlySeries({}),
     expensesProvider.getMonthlySeries({}),
-    salesProvider.getByProduct({}),
+    invoicesProvider.getByProduct({}),
     db("jewelries").where({ status: "available" }).select("category").count({ count: "*" }).groupBy("category"),
     db("jewelries").where({ status: "available" }).where("created_at", "<=", staleCutoff).count({ count: "*" }).first(),
   ]);
@@ -131,4 +131,53 @@ export const getAlerts = async (): Promise<Alert[]> => {
   }
 
   return alerts;
+};
+
+export interface NetProfitPoint {
+  month: string;
+  netProfit: number;
+}
+
+/**
+ * Everything the admin dashboard renders, in one response.
+ *
+ * The page used to make six calls, and sales and expenses were each read from
+ * the database twice (once for the summary, once for the monthly series). Here
+ * each table is read once and every aggregate is derived from those rows.
+ *
+ * The per-resource endpoints stay as they are -- the Analytics page needs them
+ * separately so it can apply its own date range.
+ */
+export const getOverview = async () => {
+  const [stats, invoices, expenses] = await Promise.all([
+    getStats(),
+    invoicesProvider.fetchInvoices({}),
+    expensesProvider.fetchExpenses({}),
+  ]);
+
+  const salesSummary = invoicesProvider.summarize(invoices);
+  const expensesSummary = expensesProvider.summarize(expenses);
+
+  // Merge the two monthly series into the single net-profit line the chart draws,
+  // so the client does not have to reconcile two sets of month keys.
+  const byMonth = new Map<string, number>();
+  for (const point of invoicesProvider.monthlySeries(invoices)) {
+    byMonth.set(point.month, point.profit);
+  }
+  for (const point of expensesProvider.monthlySeries(expenses)) {
+    byMonth.set(point.month, (byMonth.get(point.month) ?? 0) - point.amount);
+  }
+
+  const netProfitTrend: NetProfitPoint[] = Array.from(byMonth.entries())
+    .map(([month, netProfit]) => ({ month, netProfit }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  return {
+    stats,
+    sales: salesSummary,
+    expenses: expensesSummary,
+    expensesByCategory: expensesProvider.categoryBreakdown(expenses),
+    netProfitTrend,
+    netProfit: salesSummary.totalProfit - expensesSummary.totalAmount,
+  };
 };

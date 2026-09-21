@@ -1,11 +1,11 @@
 import db from "../../utils/db";
 import { computePrice, backSolveMakingCharge } from "../../utils/pricing";
 import { uploadImageBuffer, deleteImage } from "../../utils/cloudinary";
+import { getCurrentSilverRatePerGram } from "../settings/provider.settings";
 import { CreateJewelryPayload, UpdateJewelryPayload, JewelryDTO } from "./interface/interface.jewelries";
 
 export const getCurrentSilverRate = async (): Promise<number> => {
-  const settings = await db("settings").where({ id: 1 }).first();
-  return Number(settings?.silver_rate_per_gram ?? 0);
+  return getCurrentSilverRatePerGram();
 };
 
 const toDTO = (row: any, rate: number): JewelryDTO => {

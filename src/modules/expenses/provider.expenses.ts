@@ -34,7 +34,7 @@ const applyDateRange = (query: any, filters: DateRangeFilters) => {
   return query;
 };
 
-const fetchExpenses = async (filters: DateRangeFilters) => {
+export const fetchExpenses = async (filters: DateRangeFilters) => {
   const query = db("expenses").orderBy("spent_at", "desc").orderBy("id", "desc");
   const rows = await applyDateRange(query, filters);
   return rows.map(toDTO);
@@ -89,16 +89,15 @@ export const deleteExpense = async (id: number) => {
   return true;
 };
 
-export const getSummary = async (filters: DateRangeFilters): Promise<ExpensesSummary> => {
-  const expenses = await fetchExpenses(filters);
-  return expenses.reduce(
+// Aggregations are pure so a caller that already holds the rows -- the dashboard
+// overview -- can reuse them without hitting the expenses table again.
+export const summarize = (expenses: ExpenseDTO[]): ExpensesSummary =>
+  expenses.reduce(
     (acc: ExpensesSummary, expense: ExpenseDTO) => ({ count: acc.count + 1, totalAmount: acc.totalAmount + expense.amount }),
     { count: 0, totalAmount: 0 },
   );
-};
 
-export const getMonthlySeries = async (filters: DateRangeFilters): Promise<ExpensesMonthlyPoint[]> => {
-  const expenses = await fetchExpenses(filters);
+export const monthlySeries = (expenses: ExpenseDTO[]): ExpensesMonthlyPoint[] => {
   const byMonth = new Map<string, number>();
 
   for (const expense of expenses) {
@@ -111,8 +110,7 @@ export const getMonthlySeries = async (filters: DateRangeFilters): Promise<Expen
     .sort((a, b) => a.month.localeCompare(b.month));
 };
 
-export const getByCategory = async (filters: DateRangeFilters): Promise<ExpensesCategoryPoint[]> => {
-  const expenses = await fetchExpenses(filters);
+export const categoryBreakdown = (expenses: ExpenseDTO[]): ExpensesCategoryPoint[] => {
   const byCategory = new Map<string, number>();
 
   for (const expense of expenses) {
@@ -123,3 +121,12 @@ export const getByCategory = async (filters: DateRangeFilters): Promise<Expenses
     .map(([category, amount]) => ({ category, amount }))
     .sort((a, b) => b.amount - a.amount);
 };
+
+export const getSummary = async (filters: DateRangeFilters): Promise<ExpensesSummary> =>
+  summarize(await fetchExpenses(filters));
+
+export const getMonthlySeries = async (filters: DateRangeFilters): Promise<ExpensesMonthlyPoint[]> =>
+  monthlySeries(await fetchExpenses(filters));
+
+export const getByCategory = async (filters: DateRangeFilters): Promise<ExpensesCategoryPoint[]> =>
+  categoryBreakdown(await fetchExpenses(filters));

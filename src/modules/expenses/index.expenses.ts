@@ -1,12 +1,12 @@
 import express from "express";
 import * as controller from "./controller.expenses";
 import { createExpenseValidator, updateExpenseValidator } from "./validator.expenses";
-import { authenticateUser, authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 
 const router = express.Router();
 
-router.use(authenticateUser, authenticateAdmin);
+router.use(authenticateAdmin);
 
 router.get("/", asyncHandler(controller.listExpenses));
 router.get("/summary", asyncHandler(controller.getSummary));

@@ -1,8 +1,18 @@
 import db from "../../utils/db";
 import { hashPassword, comparePassword } from "../../utils/password";
-import { SignupPayload, LoginCredentials, AuthUser } from "./interface/interface.auth";
+import { signToken } from "../../utils/auth";
+import { SignupPayload, LoginCredentials, AuthUser, AuthResult } from "./interface.authentication";
 
-export const signup = async (payload: SignupPayload): Promise<AuthUser> => {
+// Authentication lives outside src/modules on purpose: these are the only
+// endpoints reachable without a token, so they are mounted at the base level
+// and never pass through the /api gate.
+
+const issue = (user: AuthUser): AuthResult => ({
+  user,
+  token: signToken({ id: user.id, name: user.name, email: user.email, role: user.role }),
+});
+
+export const signup = async (payload: SignupPayload): Promise<AuthResult> => {
   const existing = await db("users").where({ email: payload.email }).first();
   if (existing) {
     throw Object.assign(new Error("Email already registered"), { status: 409 });
@@ -16,10 +26,10 @@ export const signup = async (payload: SignupPayload): Promise<AuthUser> => {
     role: "customer",
   });
 
-  return { id, name: payload.name, email: payload.email, role: "customer" };
+  return issue({ id, name: payload.name, email: payload.email, role: "customer" });
 };
 
-export const login = async (credentials: LoginCredentials): Promise<AuthUser> => {
+export const login = async (credentials: LoginCredentials): Promise<AuthResult> => {
   const user = await db("users").where({ email: credentials.email }).first();
   if (!user) {
     throw Object.assign(new Error("Invalid email or password"), { status: 401 });
@@ -30,7 +40,7 @@ export const login = async (credentials: LoginCredentials): Promise<AuthUser> =>
     throw Object.assign(new Error("Invalid email or password"), { status: 401 });
   }
 
-  return { id: user.id, name: user.name, email: user.email, role: user.role };
+  return issue({ id: user.id, name: user.name, email: user.email, role: user.role });
 };
 
 export const getUserById = async (id: number): Promise<AuthUser | undefined> => {

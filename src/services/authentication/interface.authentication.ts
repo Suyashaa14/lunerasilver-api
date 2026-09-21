@@ -15,3 +15,8 @@ export interface AuthUser {
   email: string;
   role: "admin" | "customer";
 }
+
+export interface AuthResult {
+  user: AuthUser;
+  token: string;
+}

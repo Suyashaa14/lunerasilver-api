@@ -1,5 +1,4 @@
 import express, { Request, Response } from "express";
-import authRouter from "./modules/auth/index.auth";
 import jewelriesRouter from "./modules/jewelries/index.jewelries";
 import settingsRouter from "./modules/settings/index.settings";
 import cartRouter from "./modules/cart/index.cart";
@@ -14,7 +13,6 @@ router.use("/hello", (_req: Request, res: Response) => {
   res.status(200).json({ status: true, message: "Hello! This is the Lunera Silver API" });
 });
 
-router.use("/auth", authRouter);
 router.use("/jewelries", jewelriesRouter);
 router.use("/settings", settingsRouter);
 router.use("/cart", cartRouter);

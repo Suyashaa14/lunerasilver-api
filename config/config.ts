@@ -13,6 +13,10 @@ export const config = {
       password: process.env.MYSQL_PASSWORD || "",
       database: process.env.MYSQL_DATABASE || "lunerasilver",
       port: Number(process.env.MYSQL_PORT) || 3306,
+      // MySQL converts TIMESTAMP columns using the session time zone. Pinning
+      // the connection to UTC is what makes "timestamps are stored UTC" true
+      // rather than dependent on whatever zone the server happens to run in.
+      timezone: "+00:00",
     },
   },
   auth: {
@@ -25,7 +29,7 @@ export const config = {
     apiSecret: process.env.CLOUDINARY_API_SECRET || "",
   },
   frontend: {
-    baseUrl: process.env.FE_BASE_URL || "http://localhost:5173",
+    baseUrl: process.env.FE_BASE_URL || "http://localhost:3000",
   },
   admin: {
     name: process.env.ADMIN_NAME || "Admin",

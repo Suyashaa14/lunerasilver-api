@@ -1,7 +1,7 @@
 import express from "express";
 import * as controller from "./controller.jewelries";
 import { createJewelryValidator, updateJewelryValidator } from "./validator.jewelries";
-import { authenticateUser, authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin } from "../../middleware/auth";
 import { upload } from "../../middleware/upload";
 import { asyncHandler } from "../../utils/asyncHandler";
 
@@ -12,7 +12,6 @@ router.get("/:id", asyncHandler(controller.getJewelry));
 
 router.post(
   "/",
-  authenticateUser,
   authenticateAdmin,
   upload.single("image"),
   createJewelryValidator,
@@ -20,12 +19,11 @@ router.post(
 );
 router.put(
   "/:id",
-  authenticateUser,
   authenticateAdmin,
   upload.single("image"),
   updateJewelryValidator,
   asyncHandler(controller.updateJewelry),
 );
-router.delete("/:id", authenticateUser, authenticateAdmin, asyncHandler(controller.deleteJewelry));
+router.delete("/:id", authenticateAdmin, asyncHandler(controller.deleteJewelry));
 
 export default router;

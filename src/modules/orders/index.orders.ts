@@ -1,12 +1,10 @@
 import express from "express";
 import * as controller from "./controller.orders";
 import { createOrderValidator, updateOrderStatusValidator } from "./validator.orders";
-import { authenticateUser, authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 
 const router = express.Router();
-
-router.use(authenticateUser);
 
 router.post("/", createOrderValidator, asyncHandler(controller.createOrder));
 router.get("/mine", asyncHandler(controller.myOrders));

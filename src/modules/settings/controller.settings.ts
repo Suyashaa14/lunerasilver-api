@@ -12,7 +12,7 @@ export const updateSilverRate = async (req: Request, res: Response) => {
   if (!errors.isEmpty()) {
     return res.status(400).json({ status: false, errors: errors.array() });
   }
-  res.json(await provider.updateSilverRate(Number(req.body.silverRatePerGram)));
+  res.json(await provider.updateSilverRate(Number(req.body.silverRatePerGram), req.user?.id));
 };
 
 export const syncSilverRate = async (_req: Request, res: Response) => {

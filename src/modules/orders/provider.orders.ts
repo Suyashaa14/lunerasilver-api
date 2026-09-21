@@ -1,4 +1,5 @@
 import db from "../../utils/db";
+import { getCurrentSilverRatePerGram } from "../settings/provider.settings";
 import { computePrice } from "../../utils/pricing";
 import { CreateOrderPayload, UpdateOrderStatusPayload } from "./interface/interface.orders";
 
@@ -47,8 +48,7 @@ export const createOrder = async (userId: number, data: CreateOrderPayload) => {
       );
     }
 
-    const settings = await trx("settings").where({ id: 1 }).first();
-    const rate = Number(settings?.silver_rate_per_gram ?? 0);
+    const rate = await getCurrentSilverRatePerGram(trx);
 
     const totalAmount = cartRows.reduce(
       (sum, r) => sum + computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate),
