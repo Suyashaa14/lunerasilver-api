@@ -5,7 +5,8 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/app.js",
+    "main": "dist/src/app.js",
+    "start": "node dist/src/app.js",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "link-migrations": "node ./scripts/link-migrations.js",
     "migrate": "npm run link-migrations && knex migrate:latest --knexfile knexfile.ts",
