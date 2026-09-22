@@ -11,10 +11,13 @@ import { startSchedulers } from "./utils/scheduler";
 
 const app = express();
 
+const feOrigin = config.frontend.baseUrl.replace(/\/+$/, "");
+const apexOrigin = feOrigin.replace("://www.", "://");
+const allowedOrigins = [apexOrigin, apexOrigin.replace("://", "://www.")];
+
 app.use(
   cors({
-    origin: config.frontend.baseUrl,
-    credentials: true,
+    origin: allowedOrigins,
     maxAge: 600,
   }),
 );
