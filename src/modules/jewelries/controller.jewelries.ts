@@ -72,3 +72,23 @@ export const retireJewelry = async (req: Request, res: Response) => {
   if (!jewelry) return res.status(404).json({ status: false, message: "Jewelry not found" });
   res.json(jewelry);
 };
+
+export const listCatalogue = async (req: Request, res: Response) => {
+  res.json(
+    await provider.listCatalogue({
+      search: req.query.search ? String(req.query.search) : undefined,
+      category: req.query.category ? String(req.query.category) : undefined,
+      status: req.query.status ? String(req.query.status) : undefined,
+      staleOnly: req.query.stale === "true",
+      missingCostOnly: req.query.noCost === "true",
+      page: req.query.page ? Math.max(1, Number(req.query.page)) : 1,
+      pageSize: req.query.pageSize ? Math.max(1, Number(req.query.pageSize)) : 25,
+    }),
+  );
+};
+
+export const getJewelryDetail = async (req: Request, res: Response) => {
+  const piece = await provider.getJewelryDetail(Number(req.params.id));
+  if (!piece) return res.status(404).json({ status: false, message: "Jewelry not found" });
+  res.json(piece);
+};

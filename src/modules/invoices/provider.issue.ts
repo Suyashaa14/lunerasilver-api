@@ -136,7 +136,7 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
       const unitPrice =
         line.unitPrice !== undefined
           ? money(line.unitPrice)
-          : computePrice(Number(piece.silver_weight_grams), Number(piece.making_charge), rate);
+          : computePrice(Number(piece.silver_weight_grams), Number(piece.making_charge), rate, Number(piece.stone_price ?? 0));
       const discount = money(line.discount ?? 0);
       const lineTotal = money(unitPrice - discount);
 

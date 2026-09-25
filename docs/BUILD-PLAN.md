@@ -501,49 +501,76 @@ screen. What IRD requires on the page is decision **D3**.
 
 ---
 
-## Phase 2 — Money out and stock
+## Phase 2 — Money out and stock · `COMPLETE`
 
 Where `cost_price` comes from. Until this exists, gross profit is fiction —
 COGS currently reads 0 because nothing writes `inventory_transactions.cost_amount`.
 
-### Step 2.0 — Repoint Analytics off the retired sales table · `TODO`
+### Step 2.0 — Repoint Analytics off the retired sales table · `DONE`
 
 `lunerasilverweb/src/pages/admin/AnalyticsPage.tsx` still calls
 `/sales/summary`, `/sales/by-category`, `/sales/by-product` and
 `/sales/monthly`. Those now read `sales_legacy`, which is empty, so the page
 shows zeros for ever.
 
-**Blocker to be aware of:** `invoice_items` stores no category, so
-by-category cannot be rebuilt from invoices without adding a
-`category_snapshot` column. Decide that before rewriting the page.
+**Done (2026-09-26).** Added `invoice_items.category_snapshot` (migration
+`20260926000001`) and rebuilt by-category from it. New endpoints:
+`/api/invoices/summary`, `/monthly`, `/by-category`, `/by-product`.
+`AnalyticsPage` now reads those instead of the retired sales table.
 
-### Step 2.1 — Suppliers · `TODO`
-CRUD. **Done when** a purchase can reference a supplier with a PAN.
+Lines written before the column existed report as **"unknown"** rather than
+being back-filled from today's catalogue — the category at the time of sale was
+never recorded, and inventing it would be inventing history.
 
-### Step 2.2 — Purchases · `TODO`
-Purchase + purchase items in one transaction, unique per `(supplier_id, bill_no)`
-so the same bill cannot be entered twice. **Done when** entering a bill creates
-the pieces it bought and links each to its `purchase_items` line.
+### Step 2.1 — Suppliers · `DONE`
+`src/modules/suppliers/`, at `/api/suppliers`. CRUD with 9-digit PAN validation.
+No delete — a supplier named on a bill stays; deactivate instead.
 
-### Step 2.3 — Inventory ledger · `TODO`
-Inbound rows on purchase, adjustment, damage and loss; the outbound rows already
-come from Phase 1. **Done when** current stock reconstructed from the ledger
-matches `jewelries.status` for every piece.
+### Step 2.2 — Purchases · `DONE`
+`src/modules/purchases/`, at `/api/purchases`. One transaction records the bill,
+its lines, the pieces it created, each piece's `cost_price`, the link back to its
+bill line, and one inbound stock row each.
 
-### Step 2.4 — Expenses upgrade · `TODO`
-Wire up `supplier_id`, `bill_no`, `taxable_amount`/`vat_amount`, and
-`receipt_document_id`. Add the void flag from 0.3. **Done when** an expense can
-carry a supplier bill and a scanned receipt.
+Entering the same `(supplier, bill_no)` twice is refused by name, not by raw
+constraint error. No update, no delete — a supplier bill is evidence.
 
-### Step 2.5 — Jewellery pages rebuild · `TODO`
-List, detail and create — desktop and mobile, per the approved mockups.
-**Deliberately sequenced here:** the detail screen shows Source (supplier, bill,
-landed cost), Movement (the stock ledger) and Margin (cost price). None of that
-exists before 2.2 and 2.3, so building it earlier means building it twice.
-**Note.** The mockups specify `price = silver weight × rate + making charge +
-stone price`, with **no rounding**. Current `computePrice()` rounds up to the
-nearest Rs 50 and ignores stone price. Changing it moves storefront prices —
-confirm with the owner before touching it.
+**This is where cost price comes from.** Verified end to end: bought at 2,150,
+sold at 5,600, reported margin 3,450. Before this it read 0.
+
+### Step 2.3 — Inventory ledger · `DONE`
+`src/modules/inventory/`, at `/api/inventory`. Movements per piece, manual
+adjustments (note required), and **`GET /api/inventory/reconcile`**, which
+rebuilds stock from the ledger and reports any piece whose ledger balance
+disagrees with its status. Currently zero disagreements.
+
+Append-only: no update, no delete. A wrong movement is corrected by another
+movement, never by editing history.
+
+### Step 2.4 — Expenses upgrade · `DONE`
+`supplier_id`, `bill_no`, `payment_method`, `payment_reference` and
+`receipt_document_id` now flow through create. `taxable_amount + vat_amount`
+always add back to `amount`, the gross actually paid. The void flag came in 0.3.
+
+### Step 2.5 — Jewellery pages rebuild · `DONE`
+New endpoints `GET /api/jewelries/catalogue` (totals, filters, cost, days in
+stock, stale flag) and `GET /api/jewelries/:id/detail` (source bill, margin,
+where it appears, full ledger).
+
+`JewelryList` rewritten to the mockup — totals strip, silver rate, five filters,
+`not set` in red for a missing cost, red day count past 60, status pills, mobile
+cards. New `JewelryDetail` with Specification, Price today with its margin
+panel, Movement from the ledger, Source, In stock, Where it appears, and the
+"cannot be deleted" explanation.
+
+**⚠ PRICING CHANGED — customer-facing.** `computePrice()` now follows the
+formula printed on the screens: `silver × rate + making + stone`, with **no
+rounding**. Previously it rounded up to the nearest Rs 50 and **ignored stone
+price entirely**, so a stone-set piece was sold for less than its stone had
+cost. Verified against the mockup's own worked examples: 2,912.50 and 3,469.
+
+This moves storefront prices as well as counter prices. Issued invoices are
+unaffected — they keep their own snapshot. To revert, restore the `ceilToStep`
+rounding and drop the fourth argument in `src/utils/pricing.ts`.
 
 ---
 
@@ -645,4 +672,10 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-26 | 1.5 | Credit notes with part-credit tracking; invoice voids only when fully credited. Step **DONE**. |
 | 2026-09-26 | 1.6 | Invoice list / counter sale / invoice detail, desktop + mobile. Old Sales pages deleted. Step **DONE**. |
 | 2026-09-26 | — | **Phase 1 complete.** Counter sales work again. 60 tests passing. |
-| 2026-09-26 | ⚠ | `AnalyticsPage` still reads the retired `/sales/*` endpoints and will show zeros — see Phase 2 note. |
+| 2026-09-26 | 2.0 | `category_snapshot` added; Analytics repointed to invoice-based endpoints. Step **DONE**. |
+| 2026-09-26 | 2.1–2.3 | Suppliers, purchases (cost price at last), inventory ledger + reconcile. **DONE**. |
+| 2026-09-26 | 2.4 | Expenses carry supplier, bill, VAT split and receipt link. **DONE**. |
+| 2026-09-26 | 2.5 | Jewellery catalogue + detail endpoints; list rewritten, detail page added. **DONE**. |
+| 2026-09-26 | ⚠ | **Pricing changed**: stone price now included, Rs 50 rounding removed. Customer-facing. |
+| 2026-09-26 | — | **Phase 2 complete.** Cost and margin are real. 60 tests passing. |
+| 2026-09-26 | fix | Tests no longer reset the shared number counter — a leftover row made them collide. |

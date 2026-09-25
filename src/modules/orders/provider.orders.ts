@@ -55,7 +55,7 @@ export const createOrder = async (userId: number, data: CreateOrderPayload) => {
     const rate = await getCurrentSilverRatePerGram(trx);
 
     const totalAmount = cartRows.reduce(
-      (sum, r) => sum + computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate),
+      (sum, r) => sum + computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate, Number(r.stone_price ?? 0)),
       0,
     );
 
@@ -99,7 +99,7 @@ export const createOrder = async (userId: number, data: CreateOrderPayload) => {
         silver_weight_snapshot: r.silver_weight_grams,
         making_charge_snapshot: r.making_charge,
         silver_rate_snapshot: rate,
-        unit_price_snapshot: computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate),
+        unit_price_snapshot: computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate, Number(r.stone_price ?? 0)),
       })),
     );
 

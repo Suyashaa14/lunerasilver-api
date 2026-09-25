@@ -18,7 +18,7 @@ export const getCart = async (userId: number) => {
     status: r.status,
     silverWeightGrams: Number(r.silver_weight_grams),
     makingCharge: Number(r.making_charge),
-    price: computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate),
+    price: computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate, Number(r.stone_price ?? 0)),
   }));
 };
 

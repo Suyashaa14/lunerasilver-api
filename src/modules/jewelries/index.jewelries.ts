@@ -8,6 +8,9 @@ import { asyncHandler } from "../../utils/asyncHandler";
 const router = express.Router();
 
 router.get("/", asyncHandler(controller.listJewelries));
+// Staff view: totals, filters, cost and days in stock.
+router.get("/catalogue", authenticateAdmin, asyncHandler(controller.listCatalogue));
+router.get("/:id/detail", authenticateAdmin, asyncHandler(controller.getJewelryDetail));
 router.get("/:id", asyncHandler(controller.getJewelry));
 
 router.post(
