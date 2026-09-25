@@ -302,7 +302,7 @@ that writes it in the same step.
 The revenue path, and the fix for the counter-sale regression.
 **Unblocked** (D1 answered, D2 provisional). D3 still gates the print layout only.
 
-### Step 1.1 — Customers module · `TODO`
+### Step 1.1 — Customers module · `DONE`
 
 **Goal.** A buyer to put on a document.
 **Touches.** new `src/modules/customers/` (provider, controller, routes, validator).
@@ -310,6 +310,35 @@ The revenue path, and the fix for the counter-sale regression.
 record without a duplicate every visit.
 **Done when.** A counter sale can attach to an existing customer or create one
 in a single call, and no duplicate is created for a repeat phone number.
+
+**Progress (2026-09-25).** `src/modules/customers/` — provider, controller,
+validator, routes, mounted at `/api/customers`. Admin-only. 29 tests passing.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/customers?search=` | list, searches name / phone / email |
+| `GET /api/customers/:id` | one |
+| `POST /api/customers` | create |
+| `PUT /api/customers/:id` | update |
+| `POST /api/customers/find-or-create` | the counter-sale path |
+
+- **Phones are stored stripped** of spaces, dashes and brackets. `980-111 2222`
+  and `9801112222` resolve to the same record — verified live: the second call
+  returned the same customer id rather than a second row.
+- **An existing record is never overwritten** by a find-or-create. A repeat
+  visit reuses the buyer; it does not rewrite their name from whatever was typed
+  at the counter.
+- **No phone means a new record every time.** There is nothing to match on, and
+  merging anonymous buyers would put one person's purchases on another's account.
+- `findOrCreateByPhone` takes a connection, so invoice issuing can run it inside
+  the invoice transaction — a sale that fails leaves no stray customer. Tested.
+- **No delete route.** A customer named on an invoice has to stay; the foreign
+  keys are RESTRICT for the same reason.
+- PAN is validated as 9 digits when given, and stays optional until D2 says
+  otherwise.
+- **Orders now use this module** instead of their own copy of the logic, so
+  there is one definition of "who is this buyer". Checkout re-verified after the
+  change: `ORD-2083/84-000001`, customer attached, both date columns stamped.
 
 ### Step 1.2 — Issue an invoice · `TODO`
 
@@ -487,4 +516,5 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-25 | 0.5 | BS conversion, fiscal-year stamping, closed-year guard. 23 tests. Step **DONE**. |
 | 2026-09-25 | 0.5 | Corrected FY 2082/83 end BS date to `2083-03-32` (Ashadh has 32 days that year). |
 | 2026-09-25 | 0.5 | Fixed: `createOrder` broken since migration `…013` — checkout could not complete. |
-| 2026-09-25 | — | **Phase 0 complete.** Next: Phase 1, Step 1.1 (customers module). |
+| 2026-09-25 | — | **Phase 0 complete.** |
+| 2026-09-25 | 1.1 | Customers module + find-or-create by phone; orders rewired to it. Step **DONE**. |
