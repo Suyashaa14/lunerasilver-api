@@ -693,13 +693,64 @@ netted off when their invoice is still standing.
 
 ---
 
-## Phase 5 — Operations
+## Phase 5 — Operations · `COMPLETE` (except 5.4)
 
-- **5.1** Staff role and permissions (`users.role='staff'` exists, unused) — `TODO`
-- **5.2** Document upload and attachment (`documents` table, unused) — `TODO`
-- **5.3** Backup, retention and restore drill *(D4)* — `TODO`
-- **5.4** AML customer-ID capture above threshold *(D5)* — `TODO`
-- **5.5** Acceptance tests — `TODO`
+- **5.1** Staff role and permissions — `DONE`
+- **5.2** Document upload and attachment — `DONE`
+- **5.3** Backup and restore — `DONE`
+- **5.4** AML customer-ID capture *(D5)* — `BLOCKED`
+- **5.5** Acceptance tests — `DONE` (84 tests)
+
+**Progress (2026-09-26).**
+
+**5.1 — staff.** `authenticateStaff` alongside `authenticateAdmin`. Staff can
+sell, take payment, add stock, manage customers and suppliers. What stays with
+the owner is anything that rewrites history or changes who has access: voiding
+an invoice, issuing a credit note, closing a year, posting a manual journal,
+user management. `/api/users` deactivates, reactivates, changes role and
+anonymises. The last active admin cannot be deactivated or demoted.
+
+**5.2 — documents.** `/api/documents` uploads evidence to Cloudinary and links
+it to a row. Attaching a receipt to an expense sets `receipt_document_id` in the
+same transaction, rather than leaving a second call that might never happen.
+
+**5.3 — backup.** `npm run backup` writes a gzipped dump, then **reads it back**
+and refuses to report success unless it really contains the tables and rows.
+A dump that fails, or fails verification, is deleted rather than left looking
+like a backup. Keeps the last 30. Restore steps: `docs/BACKUP.md`.
+
+Three things had to be worked around for the low-privilege database user:
+`--single-transaction` wanted `FLUSH_TABLES`, this MySQL build dumps masking
+policies from a system table the user cannot read, and GTIDs forced a flush.
+With `--set-gtid-purged=OFF` and `--skip-masking-policies` the **consistent
+snapshot works** — verified, not assumed. If it ever falls back, it says so
+loudly and prints the one GRANT that fixes it.
+
+**`backups/` is gitignored and lives beside the database.** That covers a bad
+command, not a dead machine. Copying it off the machine is still a manual step.
+
+**5.4 — blocked on D5.** Whether dealer-in-precious-metals AML rules apply, and
+above what value customer ID must be recorded, is an accountant's answer.
+Building a threshold without knowing it would be inventing policy.
+
+### A real hole found and closed
+
+The spec says users are never deleted. Nothing enforced it: `users` was not in
+`APPEND_ONLY_TABLES`, and the foreign keys only bite once there is history to
+protect. A fresh account deleted cleanly and silently — **demonstrated
+accidentally on the live admin account while checking this very test**, which is
+the most convincing argument for the guard that could have been made.
+
+`users`, `customers`, `suppliers` and `documents` are now all append-only.
+Retire people with `is_active`, or anonymise them, which keeps the row so
+invoices and audit rows still resolve.
+
+### Test-suite fix
+
+Every test hardcoded `userId: 1`. Recreating the seeded admin gave it a new id,
+and `audit_logs.user_id` is a foreign key — so the whole suite broke. Tests now
+resolve a real admin id from the database (`src/utils/testActor.ts`) instead of
+assuming one.
 
 **On tests.** The runner was set up in Step 0.2 (`npm test`). The database spec
 lists ten acceptance tests. Write each phase's tests **within that phase**, not
@@ -762,6 +813,10 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-26 | 4.5 | CSV export with Excel BOM. XLSX deferred — would need a library. **DONE**. |
 | 2026-09-26 | fix | VAT return double-counted credit notes against voided invoices. |
 | 2026-09-26 | — | **Phase 4 complete.** Reconciliation passes; 79 tests passing. |
+| 2026-09-26 | 5.1–5.3, 5.5 | Staff roles, document upload, verified backups, acceptance tests. **DONE**. |
+| 2026-09-26 | 5.x | `users`/`customers`/`suppliers`/`documents` added to the no-delete guard — a real hole. |
+| 2026-09-26 | 5.4 | **BLOCKED on D5** — AML thresholds are the accountant's answer, not ours. |
+| 2026-09-26 | — | **Phases 0–5 complete** bar 5.4. 84 tests passing. |
 | 2026-09-26 | D2 | **Answered: PAN only.** VAT paid to suppliers now folds into cost rather than posting as a reclaimable asset. 81 tests. |
 
 ---

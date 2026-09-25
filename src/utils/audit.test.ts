@@ -31,7 +31,7 @@ test("rolling back the transaction rolls back the audit row", async () => {
         action: "create",
         entityType: ENTITY,
         entityId,
-        userId: 1,
+        userId: actor.userId,
         newValues: { note: "should not survive" },
       });
 
@@ -52,7 +52,7 @@ test("committing the transaction keeps the audit row", async () => {
       action: "update",
       entityType: ENTITY,
       entityId,
-      userId: 1,
+      userId: actor.userId,
       oldValues: { amount: 100 },
       newValues: { amount: 150 },
     });
@@ -76,7 +76,7 @@ test("credentials are redacted, never stored", async () => {
       action: "role_change",
       entityType: ENTITY,
       entityId,
-      userId: 1,
+      userId: actor.userId,
       newValues: { email: "a@b.com", password_hash: "$2b$10$realhash", nested: { token: "secret-token" } },
     });
   });
@@ -97,7 +97,7 @@ test("over-long request metadata is clipped to the column width", async () => {
       action: "login",
       entityType: ENTITY,
       entityId,
-      userId: 1,
+      userId: actor.userId,
       userAgent: "U".repeat(400),
       ipAddress: "1".repeat(80),
     });
