@@ -3,7 +3,7 @@ dotenv.config();
 
 export const config = {
   app: {
-    port: Number(process.env.PORT) || 3000,
+    port: Number(process.env.PORT) || 4000,
   },
   mysql: {
     client: "mysql2",
