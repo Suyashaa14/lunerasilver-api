@@ -6,7 +6,7 @@ import { issueCreditNote } from "../invoices/provider.creditNote";
 import { recordPayment, refundPayment, verifyPayment, getInvoiceBalance } from "./provider.payments";
 
 const MARK = "__pay_test__";
-import { actor, resolveActor } from "../utils/testActor";
+import { actor, resolveActor } from "../../utils/testActor";
 let jewelryId = 0;
 
 const wipe = async () => {

@@ -1,11 +1,14 @@
-import { test, after } from "node:test";
+import { test, after, before } from "node:test";
 import assert from "node:assert/strict";
 // unguardedDb, because the delete guard now (correctly) refuses to remove
 // audit rows -- and a test still has to clear up after itself.
 import db, { unguardedDb } from "./db";
 import { writeAuditLog } from "./audit";
+import { actor, resolveActor } from "./testActor";
 
 const ENTITY = "__audit_test__";
+
+before(resolveActor);
 
 const countRows = async (entityId: number): Promise<number> => {
   const row = await db("audit_logs").where({ entity_type: ENTITY, entity_id: entityId }).count({ c: "*" }).first();

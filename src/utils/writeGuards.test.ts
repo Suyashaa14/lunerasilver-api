@@ -1,7 +1,10 @@
-import { test, after } from "node:test";
+import { test, after, before } from "node:test";
 import assert from "node:assert/strict";
 import db, { unguardedDb } from "./db";
 import { APPEND_ONLY_TABLES, HardDeleteBlocked, ImmutableRecord, MUTABLE_COLUMNS } from "./writeGuards";
+import { actor, resolveActor } from "./testActor";
+
+before(resolveActor);
 
 after(async () => {
   await unguardedDb.destroy();
@@ -97,7 +100,7 @@ test("a user is retired by deactivating, not deleting", async () => {
   assert.throws(() => db("users").where({ id }).del(), HardDeleteBlocked);
 
   const { setActive } = await import("../modules/users/provider.users");
-  const off = await setActive(id, false, { userId: 1 });
+  const off = await setActive(id, false, actor);
   assert.equal(off!.isActive, false);
   assert.equal((await unguardedDb("users").where({ id }).first()).id, id, "the row must survive");
 

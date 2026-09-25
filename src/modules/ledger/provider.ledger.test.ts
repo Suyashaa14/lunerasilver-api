@@ -9,7 +9,7 @@ import { createPurchase } from "../purchases/provider.purchases";
 import { closePeriod, reopenPeriod } from "./provider.periods";
 
 const MARK = "__ledger_test__";
-import { actor, resolveActor } from "../utils/testActor";
+import { actor, resolveActor } from "../../utils/testActor";
 let jewelryId = 0;
 let supplierId = 0;
 

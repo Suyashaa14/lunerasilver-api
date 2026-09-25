@@ -4,7 +4,7 @@ import db, { unguardedDb } from "../../utils/db";
 import { findOrCreateByPhone, normalizePhone, createCustomer, updateCustomer } from "./provider.customers";
 
 const MARK = "__cust_test__";
-import { actor, resolveActor } from "../utils/testActor";
+import { actor, resolveActor } from "../../utils/testActor";
 
 const cleanup = async () => {
   const ids = (await unguardedDb("customers").where("name", "like", `${MARK}%`).select("id")).map((r: any) => r.id);

@@ -4,7 +4,7 @@ import db, { unguardedDb } from "../../utils/db";
 import { issueInvoice, getInvoice } from "./provider.issue";
 
 const MARK = "__inv_test__";
-import { actor, resolveActor } from "../utils/testActor";
+import { actor, resolveActor } from "../../utils/testActor";
 
 let jewelryId = 0;
 let secondPieceId = 0;

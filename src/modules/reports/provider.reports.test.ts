@@ -9,7 +9,7 @@ import { createExpense } from "../expenses/provider.expenses";
 import { profitAndLoss, balanceSheet, agedReceivables, agedPayables, stockValuation, salesRegister, vatReturn, reconciliation } from "./provider.reports";
 
 const MARK = "__report_test__";
-import { actor, resolveActor } from "../utils/testActor";
+import { actor, resolveActor } from "../../utils/testActor";
 let jewelryId = 0;
 let supplierId = 0;
 
