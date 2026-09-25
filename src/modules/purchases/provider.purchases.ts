@@ -108,6 +108,11 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
 
     const { fiscalYear, bsDate } = await stampForDate(trx, payload.billDate);
 
+    // PAN only means VAT on a bill is never coming back, so it is part of what
+    // the piece cost. Registered, it is reclaimable and stays out of the cost.
+    const business = await trx("business_profile").first("is_vat_registered");
+    const vatReclaimable = Boolean(business?.is_vat_registered);
+
     const subtotal = money(payload.items.reduce((s, i) => s + i.unitCost, 0));
     const discount = money(payload.discount ?? 0);
     const taxable = money(subtotal - discount);
@@ -133,7 +138,10 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
     });
 
     for (const line of payload.items) {
-      const lineTotal = money(line.unitCost - 0 + (line.vatAmount ?? 0));
+      const lineVat = line.vatAmount ?? 0;
+      const lineTotal = money(line.unitCost + lineVat);
+      // The landed cost every margin is measured against.
+      const landedCost = money(vatReclaimable ? line.unitCost : line.unitCost + lineVat);
 
       let jewelryId: number | null = null;
       if (line.stockIn) {
@@ -148,8 +156,7 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
           making_charge: line.stockIn.makingCharge,
           stone_weight_grams: line.stockIn.stoneWeightGrams ?? null,
           stone_price: line.stockIn.stonePrice ?? null,
-          // The landed cost. This is what every later margin is measured against.
-          cost_price: money(line.unitCost),
+          cost_price: landedCost,
           status: "available",
         });
         jewelryId = pieceId as number;
@@ -179,7 +186,7 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
           type: "purchase",
           direction: "in",
           quantity: 1,
-          cost_amount: money(line.unitCost),
+          cost_amount: landedCost,
           reference_type: "purchase",
           reference_id: newId,
           note: `${supplier.name} bill ${payload.billNo}`,

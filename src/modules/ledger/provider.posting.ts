@@ -4,6 +4,21 @@ import { postEntry } from "./provider.ledger";
 
 const money = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * Whether VAT paid to a supplier is reclaimable.
+ *
+ * Registered: the tax office owes it back, so it is an asset.
+ * PAN only: it is never coming back, so it is simply part of what the thing
+ * cost. Booking it as an asset would understate cost and flatter profit.
+ *
+ * Read from business_profile on every posting, so the day registration happens
+ * nothing has to be rewritten -- later entries just start splitting the tax out.
+ */
+const isVatRegistered = async (trx: Knex.Transaction): Promise<boolean> => {
+  const business = await trx("business_profile").first("is_vat_registered");
+  return Boolean(business?.is_vat_registered);
+};
+
 /** Which asset account money of each kind lands in. */
 const CASH_ACCOUNT: Record<string, string> = {
   cash: "1000",
@@ -153,17 +168,27 @@ export const postPurchase = async (
   purchase: { id: number; bill_no: string; bill_date: string; taxable_amount: number; vat_amount: number; tds_amount: number; total_amount: number },
   actor: AuditActor,
 ) => {
+  const reclaimable = await isVatRegistered(trx);
+  const vat = Number(purchase.vat_amount);
+
   await postEntry(trx, {
     date: String(purchase.bill_date).slice(0, 10),
     narration: `Purchase bill ${purchase.bill_no}`,
     referenceType: "purchase",
     referenceId: purchase.id,
-    lines: [
-      { account: ACCOUNTS.inventory, debit: Number(purchase.taxable_amount) },
-      { account: ACCOUNTS.vatReceivable, debit: Number(purchase.vat_amount) },
-      { account: ACCOUNTS.payable, credit: Number(purchase.total_amount) },
-      { account: ACCOUNTS.tdsPayable, credit: Number(purchase.tds_amount) },
-    ],
+    lines: reclaimable
+      ? [
+          { account: ACCOUNTS.inventory, debit: Number(purchase.taxable_amount) },
+          { account: ACCOUNTS.vatReceivable, debit: vat, note: "Reclaimable input VAT" },
+          { account: ACCOUNTS.payable, credit: Number(purchase.total_amount) },
+          { account: ACCOUNTS.tdsPayable, credit: Number(purchase.tds_amount) },
+        ]
+      : [
+          // Not registered: the tax is part of the cost of the stock.
+          { account: ACCOUNTS.inventory, debit: money(Number(purchase.taxable_amount) + vat), note: vat > 0 ? "Includes non-reclaimable VAT" : undefined },
+          { account: ACCOUNTS.payable, credit: Number(purchase.total_amount) },
+          { account: ACCOUNTS.tdsPayable, credit: Number(purchase.tds_amount) },
+        ],
   }, actor);
 };
 
@@ -174,17 +199,25 @@ export const postExpense = async (
   actor: AuditActor,
 ) => {
   const account = expense.payment_method ? CASH_ACCOUNT[expense.payment_method] ?? ACCOUNTS.cash : ACCOUNTS.cash;
+  const reclaimable = await isVatRegistered(trx);
+  const vat = Number(expense.vat_amount);
 
   await postEntry(trx, {
     date: String(expense.spent_at).slice(0, 10),
     narration: `Expense ${expense.expense_no}`,
     referenceType: "expense",
     referenceId: expense.id,
-    lines: [
-      { account: ACCOUNTS.operatingExpense, debit: Number(expense.taxable_amount) },
-      { account: ACCOUNTS.vatReceivable, debit: Number(expense.vat_amount) },
-      { account, credit: Number(expense.amount) },
-    ],
+    lines: reclaimable
+      ? [
+          { account: ACCOUNTS.operatingExpense, debit: Number(expense.taxable_amount) },
+          { account: ACCOUNTS.vatReceivable, debit: vat, note: "Reclaimable input VAT" },
+          { account, credit: Number(expense.amount) },
+        ]
+      : [
+          // Not registered: the tax is part of what the overhead cost.
+          { account: ACCOUNTS.operatingExpense, debit: money(Number(expense.taxable_amount) + vat), note: vat > 0 ? "Includes non-reclaimable VAT" : undefined },
+          { account, credit: Number(expense.amount) },
+        ],
   }, actor);
 };
 

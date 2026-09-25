@@ -77,7 +77,7 @@ These gate real work. Answers come from the accountant, not from us.
 | # | Question | Blocks | Why it matters |
 |---|---|---|---|
 | ~~D1~~ | ~~Sole proprietorship or Pvt Ltd?~~ | — | **ANSWERED 2026-09-25: Private Limited.** Certificate of Incorporation, Companies Act 2063, incorporated 2026-03-29. A Pvt Ltd must keep proper books and file audited financial statements, so **Phase 3 (general ledger) is required, not optional.** |
-| D2 | VAT-registered, or PAN only? | **Phase 1, Phase 4** | **Provisionally answered: PAN only.** The filed documents are a PAN registration certificate with no VAT certificate among them. Confirm no separate VAT registration exists — if it does, invoices must carry tax fields from the first one issued. |
+| ~~D2~~ | ~~VAT-registered, or PAN only?~~ | — | **ANSWERED 2026-09-26: PAN only**, confirmed by the owner. The system handles both; see the note below. Original finding: The filed documents are a PAN registration certificate with no VAT certificate among them. Confirm no separate VAT registration exists — if it does, invoices must carry tax fields from the first one issued. |
 | D3 | Does IRD require the billing software to be registered/approved, and must the invoice layout match a prescribed format? | **Phase 1** | Can dictate invoice fields and print layout. Cheaper to know before the first invoice than after a thousand. |
 | D4 | Required retention period and acceptable backup form for electronic records. | Phase 5 | Shapes the backup job and the archive format. |
 | D5 | Does dealer-in-precious-metals AML/CFT reporting apply, and above what value must customer ID be recorded? | Phase 5 | May force ID capture on `customers` above a threshold. |
@@ -635,18 +635,61 @@ TOTAL                    16202.50  16202.50   balances
 
 ---
 
-## Phase 4 — Statutory output
+## Phase 4 — Statutory output · `COMPLETE`
 
 Mostly queries once Phase 3 exists; mostly impossible before it.
 
-- **4.1** Trial balance, P&L, balance sheet — `TODO`
-- **4.2** Aged receivables and payables — `TODO`
-- **4.3** Stock valuation at cost — `TODO`
-- **4.4** Sales register, purchase register, VAT return *(D2)* — `TODO`
-- **4.5** Export to XLSX/PDF for the accountant — `TODO`
+- **4.1** Trial balance, P&L, balance sheet — `DONE`
+- **4.2** Aged receivables and payables — `DONE`
+- **4.3** Stock valuation at cost — `DONE`
+- **4.4** Sales register, purchase register, VAT return *(D2)* — `DONE`
+- **4.5** Export for the accountant — `DONE` (CSV, not XLSX — see below)
 
 **Done when** the year's revenue from the P&L equals the sales register total
 equals verified payments plus outstanding receivables. Three routes, one number.
+
+**Progress (2026-09-26).** `src/modules/reports/`, at `/api/reports`. 79 tests.
+
+| Route | |
+|---|---|
+| `/trial-balance` | proves debits equal credits |
+| `/profit-and-loss` | income, cost of sales, gross margin %, overheads, net profit |
+| `/balance-sheet` | assets vs liabilities + equity + unclosed profit |
+| `/aged-receivables` · `/aged-payables` | buckets: current, 31–60, 61–90, 90+ |
+| `/stock-valuation` | on-shelf pieces at cost, by category |
+| `/sales-register` · `/purchase-register` | with the tax split |
+| `/vat-return` | output less input VAT |
+| `/reconciliation` | the three-routes-one-number check |
+
+Every report reads **from the ledger**, not recomputed from documents, so it can
+never disagree with the trial balance.
+
+Verified live — bought 2 pieces (2,150 + 4,000), sold one for 5,551.25,
+part-paid 3,000, rent 800:
+
+```
+P&L      income 5551.25 · COGS 2150 · gross 3401.25 (61.3%) · rent 800 · net 2601.25
+Balance  assets 8751.25 = payables 6150 + profit 2601.25   difference 0
+Check    P&L 5551.25 = register 5551.25 = collected+owed 5551.25   agrees
+```
+
+**Two decisions worth knowing.**
+
+- **Cost of sales is split from overheads** (accounts `5xxx` vs the rest), so
+  gross margin is visible. Lumping them would hide whether a bad month was
+  buying badly or spending badly.
+- **Stock with no cost price is reported separately, not as zero.** A zero would
+  understate the valuation silently.
+
+**4.5 is CSV, not XLSX.** `?format=csv` on the main reports, with a UTF-8 BOM so
+Excel reads Devanagari correctly. CSV needs no dependency and cannot carry a
+formula error. A real `.xlsx` with formatting would mean adding a library —
+worth it only if the accountant asks.
+
+**Bug found and fixed while testing:** the VAT return subtracted credit notes
+from sales *and* excluded fully-credited invoices, which are voided — counting
+the same reversal twice and pushing sales negative. Credit notes are now only
+netted off when their invoice is still standing.
 
 ---
 
@@ -715,3 +758,42 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-26 | 3.3 | Every document posts a balanced entry inside its own transaction. **DONE**. |
 | 2026-09-26 | 3.4 | Period close refuses an unbalanced year; reopening needs a reason. **DONE**. |
 | 2026-09-26 | — | **Phase 3 complete.** Double-entry ledger live; 69 tests passing. |
+| 2026-09-26 | 4.1–4.4 | P&L, balance sheet, ageing, stock valuation, registers, VAT return. **DONE**. |
+| 2026-09-26 | 4.5 | CSV export with Excel BOM. XLSX deferred — would need a library. **DONE**. |
+| 2026-09-26 | fix | VAT return double-counted credit notes against voided invoices. |
+| 2026-09-26 | — | **Phase 4 complete.** Reconciliation passes; 79 tests passing. |
+| 2026-09-26 | D2 | **Answered: PAN only.** VAT paid to suppliers now folds into cost rather than posting as a reclaimable asset. 81 tests. |
+
+---
+
+## Non-reclaimable VAT (PAN-only)
+
+Confirmed 2026-09-26: the business is **PAN-registered, not VAT-registered**.
+
+That changes one thing in the books. VAT charged by a supplier is only an asset
+if you can claim it back. On PAN registration you cannot, so it is part of what
+the thing cost. Booking it as a receivable would understate cost and flatter
+profit — wrong in the direction that flatters, which is the worst direction.
+
+`provider.posting.ts` reads `business_profile.is_vat_registered` on **every**
+posting and branches:
+
+| Bill: goods 1,000 + VAT 130 | PAN only | VAT registered |
+|---|---|---|
+| Inventory | **1,130** | 1,000 |
+| VAT receivable | — | **130** |
+| Payable | 1,130 | 1,130 |
+| Piece `cost_price` | **1,130** | 1,000 |
+
+Both verified live and covered by tests that flip the flag.
+
+The same applies to expenses, and `cost_price` on a piece follows it, so margins
+are measured against what was actually paid.
+
+The VAT return now reports `inputVat: 0` when unregistered, with the tax paid
+shown separately as `vatPaidNotReclaimable` — offering it back would contradict
+the ledger.
+
+**Nothing has to be rewritten if registration happens later.** Flip the flag and
+later entries start splitting the tax out. Entries already posted stay as posted,
+which is correct: you could not have reclaimed that tax at the time.

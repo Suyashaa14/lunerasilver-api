@@ -30,6 +30,7 @@ const wipe = async () => {
   await unguardedDb("jewelries").where("sku", "like", `${MARK}%`).del();
   await unguardedDb("suppliers").where("name", "like", `${MARK}%`).del();
   await unguardedDb("fiscal_years").update({ status: "open" });
+  await unguardedDb("business_profile").update({ is_vat_registered: false });
 };
 
 before(wipe);
@@ -161,4 +162,48 @@ test("a year that does not balance cannot be closed, and a closed year refuses w
   await reopenPeriod("2083/84", "correcting a posting", actor);
   const payment = await recordPayment({ invoiceId: invoice.id, amount: 100, method: "cash" }, actor);
   assert.equal(payment.amount, 100);
+});
+
+// --- PAN-only vs VAT-registered ---------------------------------------------
+
+test("PAN only: VAT on a bill becomes part of the cost, not a reclaimable asset", async () => {
+  await unguardedDb("business_profile").update({ is_vat_registered: false });
+
+  await createPurchase({
+    supplierId, billNo: `${MARK}-VAT1`, billDate: "2026-09-20",
+    items: [{ description: "Stock", unitCost: 1000, vatAmount: 130,
+              stockIn: { name: "VAT Ring", category: "rings", sku: `${MARK}-v1`, silverWeightGrams: 5, makingCharge: 100 } }],
+  }, actor);
+
+  const tb = await trialBalance({});
+  const byCode = new Map(tb.rows.map((r) => [r.code, r]));
+
+  assert.equal(byCode.get("1200")!.balance, 1130, "the tax belongs in the cost of the stock");
+  assert.equal(byCode.get("1300"), undefined, "nothing should sit in VAT receivable");
+  assert.ok(tb.balances);
+
+  const piece = await unguardedDb("jewelries").where({ sku: `${MARK}-v1` }).first();
+  assert.equal(Number(piece.cost_price), 1130, "the piece's cost must include the tax it cannot reclaim");
+});
+
+test("VAT registered: the same bill splits the tax out as reclaimable", async () => {
+  await unguardedDb("business_profile").update({ is_vat_registered: true });
+
+  await createPurchase({
+    supplierId, billNo: `${MARK}-VAT2`, billDate: "2026-09-20",
+    items: [{ description: "Stock", unitCost: 1000, vatAmount: 130,
+              stockIn: { name: "VAT Ring 2", category: "rings", sku: `${MARK}-v2`, silverWeightGrams: 5, makingCharge: 100 } }],
+  }, actor);
+
+  const tb = await trialBalance({});
+  const byCode = new Map(tb.rows.map((r) => [r.code, r]));
+
+  assert.equal(byCode.get("1200")!.balance, 1000, "stock is worth the net price");
+  assert.equal(byCode.get("1300")!.balance, 130, "the tax is owed back by the tax office");
+  assert.ok(tb.balances);
+
+  const piece = await unguardedDb("jewelries").where({ sku: `${MARK}-v2` }).first();
+  assert.equal(Number(piece.cost_price), 1000, "reclaimable tax is not a cost");
+
+  await unguardedDb("business_profile").update({ is_vat_registered: false });
 });
