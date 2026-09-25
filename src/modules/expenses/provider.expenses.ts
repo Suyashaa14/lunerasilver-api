@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
 import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
+import { allocateNumber, resolveFiscalYear } from "../../services/numbering/service.numbering";
 import { toDateOnly } from "../../utils/date";
 import {
   CreateExpensePayload,
@@ -62,14 +62,14 @@ export const getExpense = async (id: number) => {
 
 export const createExpense = async (data: CreateExpensePayload) => {
   const id = await db.transaction(async (trx) => {
-    // expense_no is NOT NULL and unique, and the real number depends on the row
-    // id. Insert behind a throwaway unique value, then set the final number in
-    // the same transaction, so no half-numbered row can ever be committed.
-    // expense_no is VARCHAR(24), so the placeholder has to be short.
-    const placeholder = `TMP-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    // The number comes from the shared gapless allocator, inside this same
+    // transaction: if the insert fails, the number is handed back rather than
+    // leaving a hole in the sequence.
+    const fiscalYear = await resolveFiscalYear(trx, data.spentAt);
+    const expenseNo = await allocateNumber(trx, fiscalYear, "EXPENSE");
 
     const [newId] = await trx("expenses").insert({
-      expense_no: placeholder,
+      expense_no: expenseNo,
       category: data.category,
       amount: data.amount,
       // Not VAT-registered, so the whole amount is taxable and VAT is zero.
@@ -77,12 +77,9 @@ export const createExpense = async (data: CreateExpensePayload) => {
       taxable_amount: data.amount,
       vat_amount: 0,
       spent_at: data.spentAt,
+      fiscal_year: fiscalYear,
       note: data.note ?? null,
     });
-
-    await trx("expenses")
-      .where({ id: newId })
-      .update({ expense_no: `EXP-${String(newId).padStart(6, "0")}` });
 
     return newId;
   });

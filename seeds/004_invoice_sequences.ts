@@ -11,6 +11,7 @@ const SERIES: { series: string; prefix: string }[] = [
   { series: "SALES", prefix: "INV" },
   { series: "CN", prefix: "CN" },
   { series: "PROFORMA", prefix: "PI" },
+  { series: "EXPENSE", prefix: "EXP" },
 ];
 
 export async function seed(knex: Knex): Promise<void> {

@@ -226,7 +226,7 @@ flag; jewelries use `status = 'damaged' | 'lost'`, which writes an outbound
    `npm run typecheck` in that project. It immediately found a dead reference
    the no-op check had missed.
 
-### Step 0.4 — Gapless document numbering · `TODO`
+### Step 0.4 — Gapless document numbering · `DONE`
 
 **Goal.** Enforce §0.3. This is the single highest-risk piece of the system.
 **Touches.** new `src/services/numbering/`, `invoice_sequences`.
@@ -236,6 +236,25 @@ increments — all inside the caller's transaction. Never `MAX()+1`, never a
 timestamp, never a UUID.
 **Done when.** Concurrent allocation produces consecutive numbers with no gaps
 and no duplicates (acceptance test §6.2, 1,000 parallel issues).
+
+**Progress (2026-09-25).** `src/services/numbering/service.numbering.ts` —
+`allocateNumber(trx, fiscalYear, series)` and `resolveFiscalYear(conn, date)`.
+16 tests passing.
+
+- **1,000 parallel allocations returned 1..1000**, every one unique and
+  consecutive, in 438 ms. Each ran in its own transaction on its own
+  connection, so they genuinely contended for the counter row.
+- **A rolled-back document hands its number back** — tested. A failed save must
+  not burn a number, or the gap it leaves is indistinguishable from a hidden sale.
+- Missing counter and out-of-range date are both refused with named errors
+  (`SequenceMissing`, `FiscalYearMissing`) rather than a silent fallback.
+- **`EXPENSE` was added to the series enum** and expenses now use the allocator:
+  `EXP-2083/84-000001`, with `fiscal_year` stamped at write time. The interim
+  id-derived numbering from Step 0.3 is gone.
+
+**Note on `resolveFiscalYear`.** It reads `fiscal_years` by AD date only. Step
+0.5 still owns BS conversion, BS-date stamping and the closed-year guard — this
+allocator does **not** yet refuse a closed year.
 
 ### Step 0.5 — Fiscal year and BS date stamping · `TODO`
 
@@ -434,3 +453,4 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-25 | 0.3 | Delete guard, expense void, jewellery retire, `voided` status. Step **DONE**. |
 | 2026-09-25 | 0.3 | Fixed: expense creation broken since migration `…021` (`expense_no`/`taxable_amount` NOT NULL). |
 | 2026-09-25 | 0.3 | Fixed: `lunerasilverweb` `tsc --noEmit` checked zero files; real check is `tsc -b`. |
+| 2026-09-25 | 0.4 | Gapless allocator + `EXPENSE` series; expenses rewired. 1,000-parallel test passes. Step **DONE**. |
