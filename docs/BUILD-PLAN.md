@@ -297,7 +297,7 @@ that writes it in the same step.
 
 ---
 
-## Phase 1 — Money in
+## Phase 1 — Money in · `COMPLETE`
 
 The revenue path, and the fix for the counter-sale regression.
 **Unblocked** (D1 answered, D2 provisional). D3 still gates the print layout only.
@@ -431,7 +431,7 @@ reached the buyer or the figure was reported. Once either has happened the
 correction is a credit note (Step 1.5), which leaves the original standing.
 Voiding is also refused in a closed fiscal year.
 
-### Step 1.4 — Payments · `TODO`
+### Step 1.4 — Payments · `DONE`
 
 **Goal.** Record money actually received, partial payments included.
 **Touches.** new `src/modules/payments/`.
@@ -441,7 +441,19 @@ delete). Recompute `orders.payment_status` from the payment rows on every write
 **Done when.** An invoice can be part-paid twice and shows the right outstanding
 balance; verified payments never exceed the total unless a refund exists.
 
-### Step 1.5 — Credit notes · `TODO`
+**Progress (2026-09-26).** `src/modules/payments/`, mounted at `/api/payments`.
+
+- **Cash is verified on the spot** — the note is in the till, nothing left to
+  check. Everything else starts `pending` until matched to a statement.
+- **Pending is reported apart from paid.** "The customer says they sent it" is
+  not the same as settled, so `getInvoiceBalance` returns both.
+- Overpayment is refused (spec §6). Overpaying is nearly always a keying slip.
+- **A refund is a negative row**, never a deletion, and cannot exceed what was
+  actually taken.
+- `orders.payment_status` is recomputed from the rows on every write, never set
+  by hand.
+
+### Step 1.5 — Credit notes · `DONE`
 
 **Goal.** Returns and cancellations without touching the original.
 **Touches.** new credit-note write path.
@@ -451,7 +463,20 @@ balance; verified payments never exceed the total unless a refund exists.
 **Done when.** A returned sale stops counting as revenue on the dashboard, the
 piece is back in stock, and the original invoice row is byte-for-byte unchanged.
 
-### Step 1.6 — Counter sale UI · `TODO`
+**Progress (2026-09-26).** `provider.creditNote.ts`, at
+`POST /api/invoices/:id/credit-note`.
+
+- The original invoice is **never edited**. The credit note is its own numbered
+  document (`CN-2083/84-000001`).
+- **Part credits are supported** and tracked cumulatively: two part credits
+  cannot together exceed a line, and the remaining figure is quoted when refused.
+- **Only a fully credited line brings its piece back.** A part credit is a price
+  adjustment — the customer still has the ring.
+- The invoice goes void **only when every line is credited in full**.
+- Cash handed back is a separate negative payment, because the note records what
+  is owed and the payment records what moved.
+
+### Step 1.6 — Counter sale UI · `DONE`
 
 **Goal.** Replace the retired Sales pages; close the regression.
 **Touches.** `lunerasilverweb` — retire `SaleForm`/`SalesList`, add invoice
@@ -460,12 +485,37 @@ screens (list, new, detail, print).
 **Done when.** A shop sale can be recorded end to end in the browser and prints
 a compliant invoice.
 
+**Progress (2026-09-26).** Three screens, desktop and mobile:
+`InvoiceList`, `CounterSale`, `InvoiceDetail`. Nav now reads **Invoices**;
+`SalesList` and `SaleForm` are deleted and their routes removed.
+
+The dashboard's **Record a sale** button now reaches a working screen — it had
+been pointing at a dead route since the sales table was retired.
+
+Verified end to end through the API as the UI drives it: issue → part payment →
+overpay refused → settle → full credit note with refund → invoice void, balance
+zero, piece back on the shelf.
+
+**Still open: the print layout is not a compliant tax invoice.** It prints the
+screen. What IRD requires on the page is decision **D3**.
+
 ---
 
 ## Phase 2 — Money out and stock
 
 Where `cost_price` comes from. Until this exists, gross profit is fiction —
 COGS currently reads 0 because nothing writes `inventory_transactions.cost_amount`.
+
+### Step 2.0 — Repoint Analytics off the retired sales table · `TODO`
+
+`lunerasilverweb/src/pages/admin/AnalyticsPage.tsx` still calls
+`/sales/summary`, `/sales/by-category`, `/sales/by-product` and
+`/sales/monthly`. Those now read `sales_legacy`, which is empty, so the page
+shows zeros for ever.
+
+**Blocker to be aware of:** `invoice_items` stores no category, so
+by-category cannot be rebuilt from invoices without adding a
+`category_snapshot` column. Decide that before rewriting the page.
 
 ### Step 2.1 — Suppliers · `TODO`
 CRUD. **Done when** a purchase can reference a supplier with a PAN.
@@ -591,3 +641,8 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-25 | 1.2 | Tests serialised — shared database, parallel files were colliding. |
 | 2026-09-25 | 1.3 | Invoice immutability guard, void + restock, print count. Step **DONE**. |
 | 2026-09-25 | 1.3 | `noDelete.ts` renamed `writeGuards.ts` — it guards updates now too. |
+| 2026-09-26 | 1.4 | Payments: part payment, pending vs verified, refunds as negative rows. Step **DONE**. |
+| 2026-09-26 | 1.5 | Credit notes with part-credit tracking; invoice voids only when fully credited. Step **DONE**. |
+| 2026-09-26 | 1.6 | Invoice list / counter sale / invoice detail, desktop + mobile. Old Sales pages deleted. Step **DONE**. |
+| 2026-09-26 | — | **Phase 1 complete.** Counter sales work again. 60 tests passing. |
+| 2026-09-26 | ⚠ | `AnalyticsPage` still reads the retired `/sales/*` endpoints and will show zeros — see Phase 2 note. |

@@ -229,3 +229,58 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
 
   return (await getInvoice(invoiceId))!;
 };
+
+export interface InvoiceListFilters {
+  search?: string;
+  from?: string;
+  to?: string;
+  includeVoid?: boolean;
+  page: number;
+  pageSize: number;
+}
+
+/** The counter's day book: what was sold, to whom, and what is still owed. */
+export const listInvoices = async (filters: InvoiceListFilters) => {
+  const base = db("invoices as i").where("i.series", "SALES");
+
+  if (!filters.includeVoid) base.where("i.is_void", false);
+  if (filters.from) base.where("i.issued_at", ">=", filters.from);
+  if (filters.to) base.where("i.issued_at", "<=", `${filters.to} 23:59:59`);
+  if (filters.search) {
+    const term = `%${filters.search.trim()}%`;
+    base.where((q) => q.where("i.invoice_no", "like", term).orWhere("i.buyer_name", "like", term));
+  }
+
+  const countRow = await base.clone().count({ c: "*" }).first();
+  const rows = await base
+    .clone()
+    .select("i.*")
+    .select(
+      db.raw(
+        `COALESCE((SELECT SUM(p.amount) FROM payments p
+                   WHERE p.invoice_id = i.id AND p.status = 'verified'), 0) AS paid`,
+      ),
+    )
+    .orderBy("i.issued_at", "desc")
+    .orderBy("i.id", "desc")
+    .limit(filters.pageSize)
+    .offset((filters.page - 1) * filters.pageSize);
+
+  return {
+    data: rows.map((r: any) => ({
+      id: r.id,
+      invoiceNo: r.invoice_no,
+      issuedAt: r.issued_at,
+      issuedDateBs: r.issued_date_bs,
+      buyerName: r.buyer_name,
+      totalAmount: Number(r.total_amount),
+      paid: Number(r.paid),
+      outstanding: r.is_void ? 0 : Math.round((Number(r.total_amount) - Number(r.paid)) * 100) / 100,
+      paymentMethod: r.payment_method,
+      isVoid: Boolean(r.is_void),
+    })),
+    total: Number((countRow as { c: number | string }).c),
+    page: filters.page,
+    pageSize: filters.pageSize,
+  };
+};

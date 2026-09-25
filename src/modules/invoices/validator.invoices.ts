@@ -13,3 +13,13 @@ export const issueInvoiceValidator: ValidationChain[] = [
   body("items.*.unitPrice").optional({ values: "falsy" }).isFloat({ min: 0 }),
   body("items.*.discount").optional({ values: "falsy" }).isFloat({ min: 0 }),
 ];
+
+export const creditNoteValidator: ValidationChain[] = [
+  body("reason").isString().trim().notEmpty().withMessage("A reason is required for a credit note"),
+  body("issuedAt").optional({ values: "falsy" }).isISO8601(),
+  body("items").optional({ values: "falsy" }).isArray(),
+  body("items.*.invoiceItemId").optional().isInt({ min: 1 }),
+  body("items.*.amount").optional({ values: "falsy" }).isFloat({ gt: 0 }),
+  body("refund.amount").optional({ values: "falsy" }).isFloat({ gt: 0 }),
+  body("refund.method").optional({ values: "falsy" }).isIn(["cash", "esewa_qr", "bank_transfer", "card"]),
+];
