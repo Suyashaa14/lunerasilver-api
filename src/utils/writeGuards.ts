@@ -33,6 +33,7 @@ export const APPEND_ONLY_TABLES = [
   "users",
   "suppliers",
   "customers",
+  "documents",
 ];
 
 /**

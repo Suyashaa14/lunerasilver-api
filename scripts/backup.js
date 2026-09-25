@@ -75,12 +75,21 @@ const run = async () => {
     await dumpTo(file, true);
     return { file, consistent: true };
   } catch (err) {
+    // A half-written file must never be left lying next to real backups, where
+    // it would look like one until the day somebody needed it.
+    fs.rmSync(file, { force: true });
+
     // --single-transaction needs RELOAD or FLUSH_TABLES, which the application's
     // low-privilege user does not have. Falling back rather than failing, but
     // never silently: an inconsistent dump is a worse backup and you must know.
     if (!/RELOAD|FLUSH_TABLES/.test(err.message)) throw err;
-    fs.rmSync(file, { force: true });
-    await dumpTo(file, false);
+
+    try {
+      await dumpTo(file, false);
+    } catch (fallbackError) {
+      fs.rmSync(file, { force: true });
+      throw fallbackError;
+    }
     return { file, consistent: false };
   }
 };
@@ -113,7 +122,14 @@ const prune = () => {
 (async () => {
   try {
     const { file, consistent } = await run();
-    const { tables, inserts } = await verify(file);
+
+    let tables, inserts;
+    try {
+      ({ tables, inserts } = await verify(file));
+    } catch (err) {
+      fs.rmSync(file, { force: true });
+      throw err;
+    }
     const size = (fs.statSync(file).size / 1024).toFixed(1);
     const pruned = prune();
 

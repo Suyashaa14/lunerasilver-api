@@ -78,3 +78,40 @@ test("ordinary tables are still editable", () => {
   assert.doesNotThrow(() => db("customers").where({ id: -1 }).update({ name: "fine" }));
   assert.doesNotThrow(() => db("jewelries").where({ id: -1 }).update({ status: "available" }));
 });
+
+// Spec §6: deleting a user must not remove their orders or invoices. The
+// foreign keys only stop it once there is history to stop; a fresh account
+// deleted cleanly and silently until this guard existed.
+test("people and evidence cannot be deleted", () => {
+  for (const table of ["users", "customers", "suppliers", "documents"]) {
+    assert.throws(() => db(table).where({ id: -1 }).del(), HardDeleteBlocked, `${table} was deletable`);
+  }
+});
+
+test("a user is retired by deactivating, not deleting", async () => {
+  const [id] = await unguardedDb("users").insert({
+    name: "Guard Test", email: `guard-${Date.now()}@test.invalid`,
+    password_hash: "x", role: "staff", is_active: true,
+  });
+
+  assert.throws(() => db("users").where({ id }).del(), HardDeleteBlocked);
+
+  const { setActive } = await import("../modules/users/provider.users");
+  const off = await setActive(id, false, { userId: 1 });
+  assert.equal(off!.isActive, false);
+  assert.equal((await unguardedDb("users").where({ id }).first()).id, id, "the row must survive");
+
+  await unguardedDb("audit_logs").where({ entity_type: "users", entity_id: id }).del();
+  await unguardedDb("users").where({ id }).del();
+});
+
+test("the last admin cannot be deactivated or demoted", async () => {
+  const admin = await unguardedDb("users").where({ role: "admin", is_active: true }).first();
+  const others = await unguardedDb("users").where({ role: "admin", is_active: true }).count({ c: "*" }).first();
+
+  if (Number((others as any).c) === 1) {
+    const { setActive, setRole } = await import("../modules/users/provider.users");
+    await assert.rejects(() => setActive(admin.id, false, { userId: 999 }), /last active admin/);
+    await assert.rejects(() => setRole(admin.id, "staff", { userId: 999 }), /last admin/);
+  }
+});
