@@ -9,7 +9,7 @@ import { createExpense } from "../expenses/provider.expenses";
 import { profitAndLoss, balanceSheet, agedReceivables, agedPayables, stockValuation, salesRegister, vatReturn, reconciliation } from "./provider.reports";
 
 const MARK = "__report_test__";
-const actor = { userId: 1, ipAddress: "::1", userAgent: "test" };
+import { actor, resolveActor } from "../utils/testActor";
 let jewelryId = 0;
 let supplierId = 0;
 
@@ -25,7 +25,10 @@ const wipe = async () => {
   await unguardedDb("fiscal_years").update({ status: "open" });
 };
 
-before(wipe);
+before(async () => {
+  await resolveActor();
+  await wipe();
+});
 beforeEach(async () => {
   await wipe();
   [supplierId] = await unguardedDb("suppliers").insert({ name: `${MARK} Supplier`, pan: "123456789" });

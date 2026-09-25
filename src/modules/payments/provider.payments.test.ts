@@ -6,7 +6,7 @@ import { issueCreditNote } from "../invoices/provider.creditNote";
 import { recordPayment, refundPayment, verifyPayment, getInvoiceBalance } from "./provider.payments";
 
 const MARK = "__pay_test__";
-const actor = { userId: 1, ipAddress: "::1", userAgent: "test" };
+import { actor, resolveActor } from "../utils/testActor";
 let jewelryId = 0;
 
 const wipe = async () => {
@@ -31,7 +31,10 @@ const wipe = async () => {
 
 };
 
-before(wipe);
+before(async () => {
+  await resolveActor();
+  await wipe();
+});
 beforeEach(async () => {
   await wipe();
   [jewelryId] = await unguardedDb("jewelries").insert({

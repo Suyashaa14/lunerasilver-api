@@ -9,7 +9,7 @@ import { createPurchase } from "../purchases/provider.purchases";
 import { closePeriod, reopenPeriod } from "./provider.periods";
 
 const MARK = "__ledger_test__";
-const actor = { userId: 1, ipAddress: "::1", userAgent: "test" };
+import { actor, resolveActor } from "../utils/testActor";
 let jewelryId = 0;
 let supplierId = 0;
 
@@ -33,7 +33,10 @@ const wipe = async () => {
   await unguardedDb("business_profile").update({ is_vat_registered: false });
 };
 
-before(wipe);
+before(async () => {
+  await resolveActor();
+  await wipe();
+});
 beforeEach(async () => {
   await wipe();
   [supplierId] = await unguardedDb("suppliers").insert({ name: `${MARK} Supplier`, pan: "123456789" });

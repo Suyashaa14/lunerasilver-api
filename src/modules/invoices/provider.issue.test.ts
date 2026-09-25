@@ -4,7 +4,7 @@ import db, { unguardedDb } from "../../utils/db";
 import { issueInvoice, getInvoice } from "./provider.issue";
 
 const MARK = "__inv_test__";
-const actor = { userId: 1, ipAddress: "::1", userAgent: "test" };
+import { actor, resolveActor } from "../utils/testActor";
 
 let jewelryId = 0;
 let secondPieceId = 0;
@@ -30,7 +30,10 @@ const wipe = async () => {
 
 };
 
-before(wipe);
+before(async () => {
+  await resolveActor();
+  await wipe();
+});
 
 beforeEach(async () => {
   await wipe();

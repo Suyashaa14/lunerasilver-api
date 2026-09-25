@@ -4,7 +4,7 @@ import db, { unguardedDb } from "../../utils/db";
 import { findOrCreateByPhone, normalizePhone, createCustomer, updateCustomer } from "./provider.customers";
 
 const MARK = "__cust_test__";
-const actor = { userId: 1, ipAddress: "::1", userAgent: "test" };
+import { actor, resolveActor } from "../utils/testActor";
 
 const cleanup = async () => {
   const ids = (await unguardedDb("customers").where("name", "like", `${MARK}%`).select("id")).map((r: any) => r.id);
@@ -14,7 +14,10 @@ const cleanup = async () => {
   }
 };
 
-before(cleanup);
+before(async () => {
+  await resolveActor();
+  await cleanup();
+});
 after(async () => {
   await cleanup();
   await unguardedDb.destroy();
