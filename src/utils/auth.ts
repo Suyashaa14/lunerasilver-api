@@ -9,7 +9,7 @@ export interface JwtPayload {
   id: number;
   name: string;
   email: string;
-  role: "admin" | "customer";
+  role: "admin" | "staff" | "customer";
 }
 
 export const signToken = (payload: JwtPayload): string => {

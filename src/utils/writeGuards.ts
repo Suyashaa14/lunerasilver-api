@@ -26,6 +26,13 @@ export const APPEND_ONLY_TABLES = [
   "order_status_history",
   "journal_entries",
   "journal_entry_lines",
+  // A user is named on invoices, audit rows and ledger entries as the person who
+  // did it. Deleting one strands that history, and the foreign keys only stop it
+  // once there is history to stop it -- a fresh account deletes cleanly and
+  // silently. Deactivate instead: users.is_active.
+  "users",
+  "suppliers",
+  "customers",
 ];
 
 /**

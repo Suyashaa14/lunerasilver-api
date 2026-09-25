@@ -13,7 +13,8 @@
     "migrate": "npm run link-migrations && knex migrate:latest --knexfile knexfile.ts",
     "migrate:rollback": "npm run link-migrations && knex migrate:rollback --knexfile knexfile.ts",
     "migrate:list": "npm run link-migrations && knex migrate:list --knexfile knexfile.ts",
-    "seed": "knex seed:run --knexfile knexfile.ts"
+    "seed": "knex seed:run --knexfile knexfile.ts",
+    "backup": "node ./scripts/backup.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

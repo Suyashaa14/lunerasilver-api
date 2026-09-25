@@ -1,13 +1,13 @@
 import express from "express";
 import * as controller from "./controller.customers";
 import { createCustomerValidator, updateCustomerValidator } from "./validator.customers";
-import { authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin, authenticateStaff } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 
 const router = express.Router();
 
 // Staff-facing. Customers appear on tax documents, so only admins touch them.
-router.use(authenticateAdmin);
+router.use(authenticateStaff);
 
 router.get("/", asyncHandler(controller.listCustomers));
 router.post("/", createCustomerValidator, asyncHandler(controller.createCustomer));

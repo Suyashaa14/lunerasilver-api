@@ -1,12 +1,12 @@
 import express, { Request, Response } from "express";
 import { body, validationResult } from "express-validator";
 import * as provider from "./provider.suppliers";
-import { authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin, authenticateStaff } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { auditActor } from "../../utils/audit";
 
 const router = express.Router();
-router.use(authenticateAdmin);
+router.use(authenticateStaff);
 
 const validator = [
   body("name").isString().trim().notEmpty().withMessage("Name is required").isLength({ max: 120 }),

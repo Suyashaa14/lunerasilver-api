@@ -1,12 +1,14 @@
 import express from "express";
 import * as controller from "./controller.invoices";
 import { issueInvoiceValidator, creditNoteValidator } from "./validator.invoices";
-import { authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin, authenticateStaff } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 
 const router = express.Router();
 
-router.use(authenticateAdmin);
+// Selling is staff work. Voiding, crediting and reprinting are not -- those
+// change what the books already say.
+router.use(authenticateStaff);
 
 router.get("/", asyncHandler(controller.listInvoices));
 
@@ -18,9 +20,9 @@ router.get("/by-category", asyncHandler(controller.getByCategory));
 router.get("/by-product", asyncHandler(controller.getByProduct));
 router.post("/", issueInvoiceValidator, asyncHandler(controller.issueInvoice));
 router.get("/:id", asyncHandler(controller.getInvoice));
-router.post("/:id/void", asyncHandler(controller.voidInvoice));
+router.post("/:id/void", authenticateAdmin, asyncHandler(controller.voidInvoice));
 router.post("/:id/print", asyncHandler(controller.printInvoice));
-router.post("/:id/credit-note", creditNoteValidator, asyncHandler(controller.issueCreditNote));
+router.post("/:id/credit-note", authenticateAdmin, creditNoteValidator, asyncHandler(controller.issueCreditNote));
 router.get("/credit-notes/:id", asyncHandler(controller.getCreditNote));
 
 // No update and no delete. Voiding and counting a print are the only changes

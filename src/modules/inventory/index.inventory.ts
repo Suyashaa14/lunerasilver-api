@@ -1,12 +1,12 @@
 import express, { Request, Response } from "express";
 import { body, validationResult } from "express-validator";
 import * as provider from "./provider.inventory";
-import { authenticateAdmin } from "../../middleware/auth";
+import { authenticateAdmin, authenticateStaff } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { auditActor } from "../../utils/audit";
 
 const router = express.Router();
-router.use(authenticateAdmin);
+router.use(authenticateStaff);
 
 router.get("/reconcile", asyncHandler(async (_req: Request, res: Response) => {
   const rows = await provider.reconcileStock();

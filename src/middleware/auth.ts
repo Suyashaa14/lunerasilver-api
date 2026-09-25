@@ -56,3 +56,18 @@ export const authenticateAdmin = (req: Request, res: Response, next: NextFunctio
   }
   next();
 };
+
+/**
+ * Staff can run the shop: sell, take payment, add stock, look things up.
+ *
+ * What stays with the owner is anything that rewrites history or changes what
+ * the business is -- voiding an invoice, issuing a credit note, closing a year,
+ * posting a manual journal, changing who has access. Those are the entries an
+ * auditor asks about, and they should carry the owner's name.
+ */
+export const authenticateStaff = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user || (req.user.role !== "admin" && req.user.role !== "staff")) {
+    return res.status(403).json({ status: false, message: "Staff access required" });
+  }
+  next();
+};
