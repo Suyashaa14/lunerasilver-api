@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import * as provider from "./provider.jewelries";
+import { auditActor } from "../../utils/audit";
 
 const parsePayload = (body: any) => ({
   name: body.name,
@@ -51,8 +52,23 @@ export const updateJewelry = async (req: Request, res: Response) => {
   res.json(jewelry);
 };
 
-export const deleteJewelry = async (req: Request, res: Response) => {
-  const deleted = await provider.deleteJewelry(Number(req.params.id));
-  if (!deleted) return res.status(404).json({ status: false, message: "Jewelry not found" });
-  res.json({ status: true });
+const RETIRE_STATUSES = ["damaged", "lost", "voided"];
+
+export const retireJewelry = async (req: Request, res: Response) => {
+  const status = String(req.body?.status ?? "");
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+
+  if (!RETIRE_STATUSES.includes(status)) {
+    return res.status(400).json({
+      status: false,
+      message: `status must be one of: ${RETIRE_STATUSES.join(", ")}`,
+    });
+  }
+  if (reason.length === 0) {
+    return res.status(400).json({ status: false, message: "A reason is required" });
+  }
+
+  const jewelry = await provider.retireJewelry(Number(req.params.id), status as any, reason, auditActor(req));
+  if (!jewelry) return res.status(404).json({ status: false, message: "Jewelry not found" });
+  res.json(jewelry);
 };

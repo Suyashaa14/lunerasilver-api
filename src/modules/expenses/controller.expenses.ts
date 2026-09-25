@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { validationResult } from "express-validator";
 import * as provider from "./provider.expenses";
+import { auditActor } from "../../utils/audit";
 
 const parsePayload = (body: any) => ({
   category: body.category,
@@ -67,8 +68,13 @@ export const updateExpense = async (req: Request, res: Response) => {
   res.json(expense);
 };
 
-export const deleteExpense = async (req: Request, res: Response) => {
-  const deleted = await provider.deleteExpense(Number(req.params.id));
-  if (!deleted) return res.status(404).json({ status: false, message: "Expense not found" });
-  res.json({ status: true });
+export const voidExpense = async (req: Request, res: Response) => {
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+  if (reason.length === 0) {
+    return res.status(400).json({ status: false, message: "A reason is required to void an expense" });
+  }
+
+  const expense = await provider.voidExpense(Number(req.params.id), reason, auditActor(req));
+  if (!expense) return res.status(404).json({ status: false, message: "Expense not found" });
+  res.json(expense);
 };

@@ -15,6 +15,7 @@ router.get("/by-category", asyncHandler(controller.getByCategory));
 router.get("/:id", asyncHandler(controller.getExpense));
 router.post("/", createExpenseValidator, asyncHandler(controller.createExpense));
 router.put("/:id", updateExpenseValidator, asyncHandler(controller.updateExpense));
-router.delete("/:id", asyncHandler(controller.deleteExpense));
+// Expenses are never deleted -- see src/utils/noDelete.ts.
+router.post("/:id/void", asyncHandler(controller.voidExpense));
 
 export default router;

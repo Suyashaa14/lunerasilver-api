@@ -130,7 +130,7 @@ is editable; an issued invoice is not):
   storefront brand, used for display only. `seller_name` on an invoice is the
   legal name.
 
-### Step 0.2 — Audit log writer · `TODO`
+### Step 0.2 — Audit log writer · `DONE`
 
 **Goal.** Every financial write leaves a trace, in the same transaction.
 **Touches.** new `src/utils/audit.ts`, `audit_logs`.
@@ -140,7 +140,44 @@ it cannot be called outside one. Capture IP and user agent from the request.
 **Done when.** A unit-level check shows that rolling back the transaction also
 rolls back the audit row — the two must never diverge.
 
-### Step 0.3 — No-delete guard · `TODO`
+**Progress (2026-09-25).** `src/utils/audit.ts` — `writeAuditLog(trx, entry)`
+plus `auditActor(req)`. Four tests in `src/utils/audit.test.ts`, all passing:
+rollback discards the audit row, commit keeps it with both value snapshots,
+credentials are redacted, over-long IP/user-agent are clipped to column width.
+
+Beyond the step as written:
+- **Credential redaction.** `password_hash`, `token`, `secret` and friends are
+  replaced with `[redacted]`, recursively. Without it the first `role_change`
+  entry would copy a bcrypt hash into a table that is never deleted.
+- **Width clipping.** A long user agent would otherwise throw mid-transaction
+  and roll back a financial write for a cosmetic reason.
+- **Compile-time enforcement.** The first parameter is `Knex.Transaction`, so
+  passing the root connection fails to compile — verified, not just intended:
+  `error TS2345: Argument of type 'Knex' is not assignable to parameter of type
+  'Transaction'`.
+
+### Test runner (set up as part of this step)
+
+The project had none. `npm test` now runs Node's built-in test runner over
+`src/**/*.test.ts`:
+
+```
+TS_NODE_FILES=true node --require ts-node/register --test "src/**/*.test.ts"
+```
+
+`npm run typecheck` (`tsc --noEmit`) was added alongside it.
+
+Two things worth knowing before writing the next test:
+- **`TS_NODE_FILES=true` is required.** ts-node compiles file by file and would
+  otherwise miss `src/types/express.d.ts`, so anything touching `req.user`
+  fails to compile.
+- **Node's native TypeScript stripping does not work here.** It resolves as ESM
+  and demands file extensions; this codebase is CommonJS with extensionless
+  imports.
+- Tests run against the **dev database**. Each test cleans up after itself —
+  keep doing that, or seed data will rot.
+
+### Step 0.3 — No-delete guard · `DONE`
 
 **Goal.** Enforce database spec §0.1.
 **Touches.** `expenses`, `jewelries` providers and routes.
@@ -150,6 +187,44 @@ flag; jewelries use `status = 'damaged' | 'lost'`, which writes an outbound
 `inventory_transactions` row.
 **Done when.** No `DELETE` route remains on any financial table, and attempting
 `.del()` on one from a repository throws.
+
+**Progress (2026-09-25).**
+- `src/utils/noDelete.ts` — `db("expenses").del()` now throws, **synchronously**,
+  before the query is built. The guard follows into transactions, which is where
+  money is actually written. 14 tables covered; `cart_items` deliberately left
+  alone, since a cart is working state, not history.
+- `unguardedDb` is exported from `src/utils/db.ts` for tests and maintenance
+  only. It is an escape hatch, so the guard is a tripwire rather than a vault —
+  raw SQL still gets through. Database triggers (`BEFORE DELETE ... SIGNAL`)
+  would close that, but they would also block tests from cleaning up, which
+  needs a separate test database first.
+- **Expenses:** `DELETE /api/expenses/:id` → `POST /api/expenses/:id/void`.
+  Reason required. The row keeps its number and drops out of every total.
+- **Jewellery:** `DELETE /api/jewelries/:id` → `POST /api/jewelries/:id/retire`
+  with `damaged | lost | voided`. Writes one outbound stock-ledger row so the
+  count still adds up. A sold piece is refused — that needs a credit note.
+- **`voided` was added** as a fourth retire status. `damaged` and `lost` both
+  claim the piece existed and something happened to it; a mis-entry never
+  existed. It maps to ledger type `adjustment`, not `damage`, so the stock
+  history stops overstating losses.
+- **Sales:** the retired module's `POST`/`PUT`/`DELETE` routes were removed
+  outright rather than left to answer 410.
+- Photos are **not** deleted from Cloudinary on retire — an invoice issued
+  earlier may still be showing one.
+- 10 tests passing (`npm test`).
+
+**Two bugs found and fixed while doing this:**
+1. **Expense creation was broken** and had been since migration
+   `20260921000021`, which made `expense_no` and `taxable_amount` `NOT NULL`
+   without updating `createExpense`. Every `POST /api/expenses` returned a
+   database error. Nobody had created an expense since, so it went unseen.
+   Numbering is an interim `EXP-000007` derived from the row id — **replace it
+   with the Step 0.4 allocator.**
+2. **The frontend typecheck was checking nothing.** `lunerasilverweb/tsconfig.json`
+   is a solution file (`"files": []` plus references), so `tsc --noEmit` exits 0
+   having read no source at all. The real command is `tsc -b`, now wired up as
+   `npm run typecheck` in that project. It immediately found a dead reference
+   the no-op check had missed.
 
 ### Step 0.4 — Gapless document numbering · `TODO`
 
@@ -327,7 +402,7 @@ equals verified payments plus outstanding receivables. Three routes, one number.
 - **5.4** AML customer-ID capture above threshold *(D5)* — `TODO`
 - **5.5** Acceptance tests — `TODO`
 
-**On tests.** There is no test runner in the project at all. The database spec
+**On tests.** The runner was set up in Step 0.2 (`npm test`). The database spec
 lists ten acceptance tests. Write each phase's tests **within that phase**, not
 here; 5.5 is only the gap-fill for whatever was missed.
 
@@ -354,3 +429,8 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-25 | 0.1 | `business_profile` seeded from incorporation + PAN certificates. Step **DONE**. |
 | 2026-09-25 | D1 | **Answered: Private Limited.** Phase 3 is now required, not optional. |
 | 2026-09-25 | D2 | Provisionally PAN-only; no VAT certificate filed. Awaiting confirmation. |
+| 2026-09-25 | 0.2 | `writeAuditLog` + `auditActor` written; 4 tests passing. Step **DONE**. |
+| 2026-09-25 | 0.2 | Test runner added (`npm test`, `npm run typecheck`) — the project had none. |
+| 2026-09-25 | 0.3 | Delete guard, expense void, jewellery retire, `voided` status. Step **DONE**. |
+| 2026-09-25 | 0.3 | Fixed: expense creation broken since migration `…021` (`expense_no`/`taxable_amount` NOT NULL). |
+| 2026-09-25 | 0.3 | Fixed: `lunerasilverweb` `tsc --noEmit` checked zero files; real check is `tsc -b`. |

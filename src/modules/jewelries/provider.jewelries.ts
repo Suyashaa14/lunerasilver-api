@@ -2,6 +2,7 @@ import db from "../../utils/db";
 import { computePrice, backSolveMakingCharge } from "../../utils/pricing";
 import { uploadImageBuffer, deleteImage } from "../../utils/cloudinary";
 import { getCurrentSilverRatePerGram } from "../settings/provider.settings";
+import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { CreateJewelryPayload, UpdateJewelryPayload, JewelryDTO } from "./interface/interface.jewelries";
 
 export const getCurrentSilverRate = async (): Promise<number> => {
@@ -151,11 +152,70 @@ export const updateJewelry = async (
   return getJewelry(id);
 };
 
-export const deleteJewelry = async (id: number) => {
-  const existing = await db("jewelries").where({ id }).first();
-  if (!existing) return false;
+/** Reasons a piece leaves the shelf without being sold. */
+export type RetireStatus = "damaged" | "lost" | "voided";
 
-  if (existing.image_public_id) await deleteImage(existing.image_public_id);
-  await db("jewelries").where({ id }).delete();
-  return true;
+const RETIRE_LEDGER_TYPE: Record<RetireStatus, string> = {
+  damaged: "damage",
+  lost: "lost",
+  // A mis-entry never existed, so it is an inventory correction rather than a
+  // loss. Recording it as damage would claim a loss that never happened.
+  voided: "adjustment",
+};
+
+/**
+ * Takes a piece off the shelf without removing it.
+ *
+ * The row stays, because invoice lines and stock rows point at it and the
+ * history has to keep reading correctly. One outbound ledger row is written so
+ * the stock count still adds up, plus an audit row -- all in one transaction.
+ *
+ * The photo is deliberately left on Cloudinary: an invoice issued earlier may
+ * still be showing it.
+ */
+export const retireJewelry = async (
+  id: number,
+  status: RetireStatus,
+  reason: string,
+  actor: AuditActor,
+) => {
+  const existing = await db("jewelries").where({ id }).first();
+  if (!existing) return null;
+
+  if (existing.status === "sold") {
+    throw Object.assign(
+      new Error("This piece is sold. Reverse it with a credit note, not a status change."),
+      { status: 409 },
+    );
+  }
+  if (existing.status === status) {
+    throw Object.assign(new Error(`This piece is already marked ${status}`), { status: 409 });
+  }
+
+  await db.transaction(async (trx) => {
+    await trx("jewelries").where({ id }).update({ status });
+
+    await trx("inventory_transactions").insert({
+      jewelry_id: id,
+      type: RETIRE_LEDGER_TYPE[status],
+      direction: "out",
+      quantity: 1,
+      cost_amount: existing.cost_price ?? null,
+      reference_type: "manual",
+      reference_id: null,
+      note: reason,
+      created_by: actor.userId ?? null,
+    });
+
+    await writeAuditLog(trx, {
+      ...actor,
+      action: "void",
+      entityType: "jewelries",
+      entityId: id,
+      oldValues: { status: existing.status },
+      newValues: { status, reason },
+    });
+  });
+
+  return getJewelry(id);
 };

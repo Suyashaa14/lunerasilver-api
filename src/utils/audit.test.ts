@@ -1,6 +1,8 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import db from "./db";
+// unguardedDb, because the delete guard now (correctly) refuses to remove
+// audit rows -- and a test still has to clear up after itself.
+import db, { unguardedDb } from "./db";
 import { writeAuditLog } from "./audit";
 
 const ENTITY = "__audit_test__";
@@ -11,8 +13,8 @@ const countRows = async (entityId: number): Promise<number> => {
 };
 
 after(async () => {
-  await db("audit_logs").where({ entity_type: ENTITY }).del();
-  await db.destroy();
+  await unguardedDb("audit_logs").where({ entity_type: ENTITY }).del();
+  await unguardedDb.destroy();
 });
 
 // The rule this whole helper exists to enforce: the audit row and the change it

@@ -24,6 +24,8 @@ router.put(
   updateJewelryValidator,
   asyncHandler(controller.updateJewelry),
 );
-router.delete("/:id", authenticateAdmin, asyncHandler(controller.deleteJewelry));
+// Pieces are never deleted -- they are retired with a reason, which writes a
+// stock-ledger row. See src/utils/noDelete.ts.
+router.post("/:id/retire", authenticateAdmin, asyncHandler(controller.retireJewelry));
 
 export default router;

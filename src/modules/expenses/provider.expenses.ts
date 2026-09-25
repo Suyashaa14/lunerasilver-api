@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import db from "../../utils/db";
+import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { toDateOnly } from "../../utils/date";
 import {
   CreateExpensePayload,
@@ -35,7 +37,9 @@ const applyDateRange = (query: any, filters: DateRangeFilters) => {
 };
 
 export const fetchExpenses = async (filters: DateRangeFilters) => {
-  const query = db("expenses").orderBy("spent_at", "desc").orderBy("id", "desc");
+  // Voided expenses stay in the table for the history, but they are cancelled,
+  // so they must not reach a summary, a chart or a tax return.
+  const query = db("expenses").where("is_void", false).orderBy("spent_at", "desc").orderBy("id", "desc");
   const rows = await applyDateRange(query, filters);
   return rows.map(toDTO);
 };
@@ -57,11 +61,30 @@ export const getExpense = async (id: number) => {
 };
 
 export const createExpense = async (data: CreateExpensePayload) => {
-  const [id] = await db("expenses").insert({
-    category: data.category,
-    amount: data.amount,
-    spent_at: data.spentAt,
-    note: data.note ?? null,
+  const id = await db.transaction(async (trx) => {
+    // expense_no is NOT NULL and unique, and the real number depends on the row
+    // id. Insert behind a throwaway unique value, then set the final number in
+    // the same transaction, so no half-numbered row can ever be committed.
+    // expense_no is VARCHAR(24), so the placeholder has to be short.
+    const placeholder = `TMP-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+
+    const [newId] = await trx("expenses").insert({
+      expense_no: placeholder,
+      category: data.category,
+      amount: data.amount,
+      // Not VAT-registered, so the whole amount is taxable and VAT is zero.
+      // When registration happens this splits properly -- see D2 in the plan.
+      taxable_amount: data.amount,
+      vat_amount: 0,
+      spent_at: data.spentAt,
+      note: data.note ?? null,
+    });
+
+    await trx("expenses")
+      .where({ id: newId })
+      .update({ expense_no: `EXP-${String(newId).padStart(6, "0")}` });
+
+    return newId;
   });
 
   return getExpense(id);
@@ -82,11 +105,41 @@ export const updateExpense = async (id: number, data: UpdateExpensePayload) => {
   return getExpense(id);
 };
 
-export const deleteExpense = async (id: number) => {
+/**
+ * Cancels an expense without removing it.
+ *
+ * The row stays and keeps its number, so a gap never appears in the sequence;
+ * it simply stops counting. The reason and the person are recorded, and the
+ * audit row is written in the same transaction as the change.
+ */
+export const voidExpense = async (id: number, reason: string, actor: AuditActor) => {
   const existing = await db("expenses").where({ id }).first();
-  if (!existing) return false;
-  await db("expenses").where({ id }).delete();
-  return true;
+  if (!existing) return null;
+
+  if (existing.is_void) {
+    throw Object.assign(new Error("This expense is already voided"), { status: 409 });
+  }
+
+  await db.transaction(async (trx) => {
+    await trx("expenses").where({ id }).update({
+      is_void: true,
+      void_reason: reason,
+      voided_by: actor.userId ?? null,
+      voided_at: trx.fn.now(),
+    });
+
+    await writeAuditLog(trx, {
+      ...actor,
+      action: "void",
+      entityType: "expenses",
+      entityId: id,
+      oldValues: { is_void: false },
+      newValues: { is_void: true, void_reason: reason },
+    });
+  });
+
+  const row = await db("expenses").where({ id }).first();
+  return toDTO(row);
 };
 
 // Aggregations are pure so a caller that already holds the rows -- the dashboard
