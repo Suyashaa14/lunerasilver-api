@@ -340,7 +340,7 @@ validator, routes, mounted at `/api/customers`. Admin-only. 29 tests passing.
   there is one definition of "who is this buyer". Checkout re-verified after the
   change: `ORD-2083/84-000001`, customer attached, both date columns stamped.
 
-### Step 1.2 — Issue an invoice · `TODO`
+### Step 1.2 — Issue an invoice · `DONE`
 
 **Goal.** The §4 "issue invoice" transaction.
 **Touches.** new `src/modules/invoices/` write path.
@@ -352,6 +352,46 @@ issue time, not joined.
 **Done when.** An invoice exists with items whose `line_total` sums to
 `subtotal`, the piece is `sold`, a stock row exists per line, and an audit row
 was written — all or nothing.
+
+**Progress (2026-09-25).** `src/modules/invoices/provider.issue.ts`, mounted at
+`POST /api/invoices` and `GET /api/invoices/:id`. Admin-only. 38 tests passing.
+
+One transaction does all of it: find-or-create the buyer → stamp the period
+(refusing a closed year) → take a `SALES` number → lock the pieces → write the
+invoice and its lines → mark the pieces sold → write one outbound stock row per
+line carrying `cost_amount` → write the audit row.
+
+Verified live — `INV-2083/84-000001`, seller details snapshotted from
+`business_profile`, `issued_date_bs 2083-06-09`.
+
+**Tested behaviours:**
+- **Two tills, same piece, at once → exactly one wins.** Spec §6.1. The pieces
+  are locked with `FOR UPDATE`, so the loser waits, finds it sold, and is
+  refused. No second invoice is left behind.
+- **A failed sale leaves nothing.** No burned invoice number, no stray customer,
+  no stock row, piece still available.
+- **Figures are snapshots.** Renaming a piece or changing its weight after the
+  fact does not alter an issued invoice.
+- Already-sold, damaged, lost and voided pieces are all refused.
+- A discount larger than the price is refused.
+- The buyer is reused across sales rather than duplicated.
+
+**Money maths.** `line_total = unit_price − discount`, excluding VAT;
+`subtotal = Σ line_total`, so the spec's reconciliation rule holds even with
+discounts. `taxable_amount = subtotal`, `total = taxable + VAT`. VAT is written
+as `0.00` throughout while D2 stands, so the shape never changes if the shop
+registers later.
+
+**Test-suite note.** Files now run **one at a time**
+(`--test-concurrency=1`). They share one database, and node's runner parallelises
+files by default — the invoice tests were resetting a counter the numbering
+tests were mid-way through using.
+
+**Pricing still unresolved.** Line prices use `computePrice()`, the same
+function the storefront uses, which rounds up to Rs 50 and **ignores stone
+price**. The jewellery mockups specify `silver × rate + making + stone` with no
+rounding. Until that is decided, a stone-set piece invoices below its stone
+cost. Carried to Step 2.5.
 
 ### Step 1.3 — Invoice immutability and void · `TODO`
 
@@ -518,3 +558,5 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-25 | 0.5 | Fixed: `createOrder` broken since migration `…013` — checkout could not complete. |
 | 2026-09-25 | — | **Phase 0 complete.** |
 | 2026-09-25 | 1.1 | Customers module + find-or-create by phone; orders rewired to it. Step **DONE**. |
+| 2026-09-25 | 1.2 | Invoice issuing in one transaction; concurrency test passes. Step **DONE**. |
+| 2026-09-25 | 1.2 | Tests serialised — shared database, parallel files were colliding. |

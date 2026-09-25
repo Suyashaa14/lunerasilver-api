@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import customersRouter from "./modules/customers/index.customers";
+import invoicesRouter from "./modules/invoices/index.invoices";
 import jewelriesRouter from "./modules/jewelries/index.jewelries";
 import settingsRouter from "./modules/settings/index.settings";
 import cartRouter from "./modules/cart/index.cart";
@@ -15,6 +16,7 @@ router.use("/hello", (_req: Request, res: Response) => {
 });
 
 router.use("/customers", customersRouter);
+router.use("/invoices", invoicesRouter);
 router.use("/jewelries", jewelriesRouter);
 router.use("/settings", settingsRouter);
 router.use("/cart", cartRouter);

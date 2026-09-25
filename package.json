@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/src/app.js",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
-    "test": "TS_NODE_FILES=true node --require ts-node/register --test \"src/**/*.test.ts\"",
+    "test": "TS_NODE_FILES=true node --require ts-node/register --test --test-concurrency=1 \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "link-migrations": "node ./scripts/link-migrations.js",
     "migrate": "npm run link-migrations && knex migrate:latest --knexfile knexfile.ts",
