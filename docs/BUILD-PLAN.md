@@ -88,7 +88,7 @@ print layout is built. The rest can wait.
 
 ---
 
-## Phase 0 — Make what exists trustworthy
+## Phase 0 — Make what exists trustworthy · `COMPLETE`
 
 Small, and it only gets more expensive the longer it waits: an audit trail
 retrofitted onto data written without one is worth very little.
@@ -256,7 +256,7 @@ and no duplicates (acceptance test §6.2, 1,000 parallel issues).
 0.5 still owns BS conversion, BS-date stamping and the closed-year guard — this
 allocator does **not** yet refuse a closed year.
 
-### Step 0.5 — Fiscal year and BS date stamping · `TODO`
+### Step 0.5 — Fiscal year and BS date stamping · `DONE`
 
 **Goal.** Enforce §0.4 and make closed years actually closed.
 **Touches.** new `src/utils/fiscalYear.ts`, all financial inserts.
@@ -264,6 +264,36 @@ allocator does **not** yet refuse a closed year.
 refuses any insert carrying a `closed` year.
 **Done when.** Every financial insert stamps `fiscal_year` and its `*_bs` column
 at write time, and inserting into a closed year is rejected.
+
+**Progress (2026-09-25).** `src/utils/fiscalYear.ts` — `toBsDate`,
+`resolveFiscalYear`, `assertFiscalYearOpen`, `stampForDate`. 23 tests passing.
+
+- **BS conversion uses `nepali-date-converter`** (MIT). BS month lengths are a
+  lookup table, not arithmetic, so this could not be hand-written from memory
+  without inventing tax-critical data. `nepali-datetime` was rejected: it is
+  **GPL-3.0**, which would force this application to be open-sourced.
+- **Verified against the company's own Certificate of Incorporation**, which
+  prints both calendars: 2026-03-29 AD = 2082-12-15 BS. Matches.
+- **Corrected Step 0.1's seed.** Ashadh 2083 has **32** days, not 31, so
+  FY 2082/83 ends `2083-03-32`. The seed and the live row are fixed. This was
+  the exact uncertainty flagged in 0.1 — and it was wrong.
+- `stampForDate` resolves the year, refuses it if closed, and returns the BS
+  date. One place for the guard, so it cannot be applied inconsistently.
+- `updateExpense` **re-stamps on every write**: moving a date into another
+  fiscal year moves the stamp with it, and is refused if that year is closed.
+  Editing a row already in a closed year is refused too.
+
+**A second broken write path, found and fixed:** `createOrder` never set
+`customer_id`, `order_no`, `fiscal_year` or `placed_at_bs`, all of which
+migration `…013` made required. **Checkout had been failing since then** — the
+same mistake as the expenses bug in Step 0.3. Orders now find-or-create a
+customer, take an `ORD-2083/84-000001` number from the allocator, and stamp both
+period columns. Verified end to end.
+
+**Lesson for later phases.** Twice now a migration has made a column required
+without the write path being updated, and both went unnoticed because nothing
+exercised the path. When a phase adds a required column, exercise the endpoint
+that writes it in the same step.
 
 ---
 
@@ -454,3 +484,7 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-25 | 0.3 | Fixed: expense creation broken since migration `…021` (`expense_no`/`taxable_amount` NOT NULL). |
 | 2026-09-25 | 0.3 | Fixed: `lunerasilverweb` `tsc --noEmit` checked zero files; real check is `tsc -b`. |
 | 2026-09-25 | 0.4 | Gapless allocator + `EXPENSE` series; expenses rewired. 1,000-parallel test passes. Step **DONE**. |
+| 2026-09-25 | 0.5 | BS conversion, fiscal-year stamping, closed-year guard. 23 tests. Step **DONE**. |
+| 2026-09-25 | 0.5 | Corrected FY 2082/83 end BS date to `2083-03-32` (Ashadh has 32 days that year). |
+| 2026-09-25 | 0.5 | Fixed: `createOrder` broken since migration `…013` — checkout could not complete. |
+| 2026-09-25 | — | **Phase 0 complete.** Next: Phase 1, Step 1.1 (customers module). |

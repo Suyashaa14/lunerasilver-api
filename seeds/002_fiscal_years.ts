@@ -3,10 +3,10 @@ import type { Knex } from "knex";
 /**
  * Nepali fiscal years run Shrawan 1 to the last day of Ashadh.
  *
- * BS month lengths vary year to year, so these AD boundaries and the Ashadh
- * end-day are the commonly published ones -- confirm them against an official
- * calendar before issuing documents, because every financial row is stamped
- * with the fiscal_year these dates resolve to.
+ * Every boundary below was checked against nepali-date-converter, including
+ * against a known anchor: 2026-03-29 AD = 2082-12-15 BS, the incorporation date
+ * printed on the company certificate. Ashadh length varies -- 2083 has 32 days,
+ * 2084 has 31 -- so these are not interchangeable between years.
  *
  * Both years are seeded `open`. Closing a year is a deliberate act once the
  * accountant has signed it off, not something a seed should decide.
@@ -17,7 +17,7 @@ const FISCAL_YEARS = [
     start_date: "2025-07-17",
     end_date: "2026-07-16",
     start_date_bs: "2082-04-01", // Shrawan 1
-    end_date_bs: "2083-03-31",   // Ashadh end -- verify 31 vs 32
+    end_date_bs: "2083-03-32",   // Ashadh 2083 has 32 days (verified via nepali-date-converter)
   },
   {
     name: "2083/84",

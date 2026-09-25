@@ -1,6 +1,9 @@
 import type { Knex } from "knex";
 
-export type DocumentSeries = "SALES" | "CN" | "PROFORMA" | "EXPENSE";
+// Fiscal-year lookup and the closed-year guard live in one place.
+export { resolveFiscalYear, FiscalYearMissing, FiscalYearClosed, stampForDate, toBsDate } from "../../utils/fiscalYear";
+
+export type DocumentSeries = "SALES" | "CN" | "PROFORMA" | "EXPENSE" | "ORDER";
 
 export class SequenceMissing extends Error {
   status = 400;
@@ -10,14 +13,6 @@ export class SequenceMissing extends Error {
         `Seed invoice_sequences before issuing documents in this year.`,
     );
     this.name = "SequenceMissing";
-  }
-}
-
-export class FiscalYearMissing extends Error {
-  status = 400;
-  constructor(date: string) {
-    super(`No fiscal year covers ${date}. Add it to fiscal_years first.`);
-    this.name = "FiscalYearMissing";
   }
 }
 
@@ -49,18 +44,4 @@ export const allocateNumber = async (
   await trx("invoice_sequences").where({ id: counter.id }).update({ next_number: next + 1 });
 
   return `${counter.prefix}-${fiscalYear}-${String(next).padStart(6, "0")}`;
-};
-
-/** Which fiscal year a date falls in. Full BS stamping arrives in Step 0.5. */
-export const resolveFiscalYear = async (
-  conn: Knex | Knex.Transaction,
-  date: string,
-): Promise<string> => {
-  const year = await conn("fiscal_years")
-    .where("start_date", "<=", date)
-    .andWhere("end_date", ">=", date)
-    .first("name");
-
-  if (!year) throw new FiscalYearMissing(date);
-  return year.name as string;
 };

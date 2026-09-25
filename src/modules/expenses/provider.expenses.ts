@@ -1,6 +1,7 @@
 import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
-import { allocateNumber, resolveFiscalYear } from "../../services/numbering/service.numbering";
+import { allocateNumber } from "../../services/numbering/service.numbering";
+import { stampForDate, assertFiscalYearOpen } from "../../utils/fiscalYear";
 import { toDateOnly } from "../../utils/date";
 import {
   CreateExpensePayload,
@@ -65,7 +66,8 @@ export const createExpense = async (data: CreateExpensePayload) => {
     // The number comes from the shared gapless allocator, inside this same
     // transaction: if the insert fails, the number is handed back rather than
     // leaving a hole in the sequence.
-    const fiscalYear = await resolveFiscalYear(trx, data.spentAt);
+    // Stamps the period and the BS date, and refuses a closed year.
+    const { fiscalYear, bsDate } = await stampForDate(trx, data.spentAt);
     const expenseNo = await allocateNumber(trx, fiscalYear, "EXPENSE");
 
     const [newId] = await trx("expenses").insert({
@@ -77,6 +79,7 @@ export const createExpense = async (data: CreateExpensePayload) => {
       taxable_amount: data.amount,
       vat_amount: 0,
       spent_at: data.spentAt,
+      spent_at_bs: bsDate,
       fiscal_year: fiscalYear,
       note: data.note ?? null,
     });
@@ -91,15 +94,33 @@ export const updateExpense = async (id: number, data: UpdateExpensePayload) => {
   const existing = await db("expenses").where({ id }).first();
   if (!existing) return null;
 
-  const update: Record<string, unknown> = {
-    category: data.category ?? existing.category,
-    amount: data.amount ?? existing.amount,
-    spent_at: data.spentAt ?? existing.spent_at,
-    note: data.note ?? existing.note,
-  };
+  if (existing.is_void) {
+    throw Object.assign(new Error("This expense is voided and can no longer be edited"), { status: 409 });
+  }
 
-  await db("expenses").where({ id }).update(update);
-  return getExpense(id);
+  return db.transaction(async (trx) => {
+    // The year the row is already in has to be open, or a signed-off period
+    // could be changed after the fact.
+    if (existing.fiscal_year) await assertFiscalYearOpen(trx, existing.fiscal_year);
+
+    const spentAt = data.spentAt ?? existing.spent_at;
+    // Re-stamped on every write. Moving the date to another fiscal year moves
+    // the stamp with it -- and is refused if that year is closed.
+    const { fiscalYear, bsDate } = await stampForDate(trx, spentAt);
+    const amount = data.amount ?? existing.amount;
+
+    await trx("expenses").where({ id }).update({
+      category: data.category ?? existing.category,
+      amount,
+      taxable_amount: amount,
+      spent_at: spentAt,
+      spent_at_bs: bsDate,
+      fiscal_year: fiscalYear,
+      note: data.note ?? existing.note,
+    });
+
+    return getExpense(id);
+  });
 };
 
 /**

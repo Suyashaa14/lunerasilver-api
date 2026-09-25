@@ -1,4 +1,7 @@
+import type { Knex } from "knex";
 import db from "../../utils/db";
+import { allocateNumber } from "../../services/numbering/service.numbering";
+import { stampForDate } from "../../utils/fiscalYear";
 import { getCurrentSilverRatePerGram } from "../settings/provider.settings";
 import { computePrice } from "../../utils/pricing";
 import { CreateOrderPayload, UpdateOrderStatusPayload } from "./interface/interface.orders";
@@ -29,6 +32,31 @@ const serializeOrder = (order: any, items: any[]) => ({
   })),
 });
 
+/**
+ * Every order needs a customer row. One is reused if this login already has
+ * one, so a repeat buyer does not collect a new customer record per order.
+ * Delivery details come from the order form, which is the freshest thing we have.
+ */
+const findOrCreateCustomerForUser = async (
+  trx: Knex.Transaction,
+  userId: number,
+  data: CreateOrderPayload,
+): Promise<number> => {
+  const existing = await trx("customers").where({ user_id: userId }).first("id");
+  if (existing) return existing.id as number;
+
+  const user = await trx("users").where({ id: userId }).first("name", "email", "phone");
+  const [customerId] = await trx("customers").insert({
+    user_id: userId,
+    name: data.recipientName || user?.name || "Customer",
+    phone: data.phone ?? user?.phone ?? null,
+    email: user?.email ?? null,
+    address_line: data.addressLine ?? null,
+    city: data.city ?? null,
+  });
+  return customerId as number;
+};
+
 export const createOrder = async (userId: number, data: CreateOrderPayload) => {
   return db.transaction(async (trx) => {
     const cartRows = await trx("cart_items")
@@ -57,7 +85,19 @@ export const createOrder = async (userId: number, data: CreateOrderPayload) => {
 
     const paymentStatus = data.paymentMethod === "esewa_qr" ? "awaiting_verification" : "unpaid";
 
+    // An order belongs to a customer, which is the accounting identity. The
+    // login account is optional and separate -- a counter buyer has no login.
+    const customerId = await findOrCreateCustomerForUser(trx, userId, data);
+
+    const placedAt = new Date();
+    const { fiscalYear, bsDate } = await stampForDate(trx, placedAt);
+    const orderNo = await allocateNumber(trx, fiscalYear, "ORDER");
+
     const [orderId] = await trx("orders").insert({
+      customer_id: customerId,
+      order_no: orderNo,
+      fiscal_year: fiscalYear,
+      placed_at_bs: bsDate,
       user_id: userId,
       payment_method: data.paymentMethod,
       payment_status: paymentStatus,
