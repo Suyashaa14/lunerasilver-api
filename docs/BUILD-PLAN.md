@@ -393,7 +393,7 @@ price**. The jewellery mockups specify `silver × rate + making + stone` with no
 rounding. Until that is decided, a stone-set piece invoices below its stone
 cost. Carried to Step 2.5.
 
-### Step 1.3 — Invoice immutability and void · `TODO`
+### Step 1.3 — Invoice immutability and void · `DONE`
 
 **Goal.** Enforce §0.2.
 **Touches.** invoices repository.
@@ -401,6 +401,35 @@ cost. Carried to Step 2.5.
 `voided_at`, `print_count`. Voiding requires a reason.
 **Done when.** Updating an amount column on an issued invoice is refused at the
 repository, not merely avoided by the caller.
+
+**Progress (2026-09-25).** `src/utils/noDelete.ts` is now
+`src/utils/writeGuards.ts` — the name was a lie once it guarded updates too.
+48 tests passing.
+
+- `MUTABLE_COLUMNS` lists what may still change: on `invoices`, only `is_void`,
+  `void_reason`, `voided_by`, `voided_at` and `print_count`. On `invoice_items`,
+  **nothing**.
+- Refused at the query builder, so it throws wherever it is called from:
+  `invoices is immutable once issued. Refused change to: total_amount.`
+- **`increment()` is guarded separately.** It builds its own UPDATE and would
+  otherwise have walked straight past the guard — `increment("total_amount")` is
+  refused, `increment("print_count")` is allowed.
+- Both knex forms are covered: `update({col: v})` and `update("col", v)`.
+
+**Void** — `POST /api/invoices/:id/void`, reason required. The row stays and
+keeps its number, so the sequence never gains a hole; it stops counting as
+revenue; the pieces go back on the shelf with an inbound stock row. Verified:
+stock moves read `["out", "in"]`, the piece returns to `available`, the total is
+untouched, and a restocked piece can be sold again on a **new** number — the
+voided one is never reused.
+
+**Print** — `POST /api/invoices/:id/print` increments the count and returns
+`isCopy` once it is past the first, since only the first print is the original.
+
+**Void is not a credit note.** It is for an invoice issued in error, before it
+reached the buyer or the figure was reported. Once either has happened the
+correction is a credit note (Step 1.5), which leaves the original standing.
+Voiding is also refused in a closed fiscal year.
 
 ### Step 1.4 — Payments · `TODO`
 
@@ -560,3 +589,5 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-25 | 1.1 | Customers module + find-or-create by phone; orders rewired to it. Step **DONE**. |
 | 2026-09-25 | 1.2 | Invoice issuing in one transaction; concurrency test passes. Step **DONE**. |
 | 2026-09-25 | 1.2 | Tests serialised — shared database, parallel files were colliding. |
+| 2026-09-25 | 1.3 | Invoice immutability guard, void + restock, print count. Step **DONE**. |
+| 2026-09-25 | 1.3 | `noDelete.ts` renamed `writeGuards.ts` — it guards updates now too. |

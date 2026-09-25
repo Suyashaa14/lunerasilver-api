@@ -170,3 +170,55 @@ test("the buyer is reused, not duplicated, across two sales", async () => {
   assert.equal(second.customerId, first.customerId);
   assert.equal((await unguardedDb("customers").where({ phone: "9800001111" })).length, 1);
 });
+
+// --- Step 1.3: void ----------------------------------------------------------
+
+test("voiding keeps the invoice, drops it from revenue and restocks the piece", async () => {
+  const { voidInvoice } = await import("./provider.void");
+  const invoice = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+
+  const voided = await voidInvoice(invoice.id, "issued to the wrong customer", actor);
+
+  assert.equal(voided!.isVoid, true);
+  assert.equal(voided!.voidReason, "issued to the wrong customer");
+  // Still there, still numbered -- the sequence keeps no holes.
+  assert.equal(voided!.invoiceNo, invoice.invoiceNo);
+  assert.equal(voided!.totalAmount, invoice.totalAmount);
+
+  const piece = await unguardedDb("jewelries").where({ id: jewelryId }).first();
+  assert.equal(piece.status, "available", "a voided sale left the piece off the shelf");
+
+  const ledger = await unguardedDb("inventory_transactions")
+    .where({ reference_type: "invoice", reference_id: invoice.id })
+    .orderBy("id");
+  assert.deepEqual(ledger.map((r: any) => r.direction), ["out", "in"], "stock must go out then come back");
+
+  const audit = await unguardedDb("audit_logs").where({ entity_type: "invoices", entity_id: invoice.id });
+  assert.deepEqual(audit.map((r: any) => r.action), ["create", "void"]);
+});
+
+test("a voided invoice cannot be voided twice", async () => {
+  const { voidInvoice } = await import("./provider.void");
+  const invoice = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+  await voidInvoice(invoice.id, "first", actor);
+  await assert.rejects(() => voidInvoice(invoice.id, "second", actor), /already void/);
+});
+
+test("a restocked piece can be sold again", async () => {
+  const { voidInvoice } = await import("./provider.void");
+  const first = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+  await voidInvoice(first.id, "wrong customer", actor);
+
+  const second = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+  assert.notEqual(second.id, first.id);
+  assert.notEqual(second.invoiceNo, first.invoiceNo, "the voided number must not be reused");
+});
+
+test("printing counts, and the first one is the original", async () => {
+  const { recordPrint } = await import("./provider.void");
+  const invoice = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+  assert.equal(invoice.printCount, 0);
+
+  assert.equal((await recordPrint(invoice.id, actor))!.printCount, 1);
+  assert.equal((await recordPrint(invoice.id, actor))!.printCount, 2);
+});

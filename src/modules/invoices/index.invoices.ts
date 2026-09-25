@@ -10,8 +10,10 @@ router.use(authenticateAdmin);
 
 router.post("/", issueInvoiceValidator, asyncHandler(controller.issueInvoice));
 router.get("/:id", asyncHandler(controller.getInvoice));
+router.post("/:id/void", asyncHandler(controller.voidInvoice));
+router.post("/:id/print", asyncHandler(controller.printInvoice));
 
-// No update and no delete. An issued invoice is immutable -- Step 1.3 adds the
-// only permitted change, which is voiding it.
+// No update and no delete. Voiding and counting a print are the only changes
+// an issued invoice allows, and src/utils/writeGuards.ts enforces that.
 
 export default router;

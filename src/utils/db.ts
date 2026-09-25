@@ -1,6 +1,6 @@
 import knex from "knex";
 import mysqlConfig from "../../knexfile";
-import { withDeleteGuard } from "./noDelete";
+import { withWriteGuards } from "./writeGuards";
 
 /**
  * Raw connection, with no delete guard.
@@ -14,6 +14,6 @@ export const unguardedDb = knex(mysqlConfig);
  * The connection the app uses. Calling `.del()` on a money table throws --
  * see src/utils/noDelete.ts for the list and the reasoning.
  */
-const db = withDeleteGuard(unguardedDb);
+const db = withWriteGuards(unguardedDb);
 
 export default db;
