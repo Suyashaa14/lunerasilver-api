@@ -1,4 +1,10 @@
 export interface CreateExpensePayload {
+  supplierId?: number | null;
+  billNo?: string | null;
+  vatAmount?: number;
+  paymentMethod?: string | null;
+  paymentReference?: string | null;
+  receiptDocumentId?: number | null;
   category: string;
   amount: number;
   spentAt: string;

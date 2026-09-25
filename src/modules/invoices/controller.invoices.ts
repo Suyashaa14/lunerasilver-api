@@ -3,6 +3,7 @@ import { validationResult } from "express-validator";
 import * as issuer from "./provider.issue";
 import * as voider from "./provider.void";
 import * as creditNotes from "./provider.creditNote";
+import * as analytics from "./provider.invoices";
 import { auditActor } from "../../utils/audit";
 
 export const issueInvoice = async (req: Request, res: Response) => {
@@ -69,4 +70,25 @@ export const listInvoices = async (req: Request, res: Response) => {
       pageSize: req.query.pageSize ? Math.max(1, Number(req.query.pageSize)) : 20,
     }),
   );
+};
+
+const range = (query: any) => ({
+  from: query.from ? String(query.from) : undefined,
+  to: query.to ? String(query.to) : undefined,
+});
+
+export const getSummary = async (req: Request, res: Response) => {
+  res.json(await analytics.getSummary(range(req.query)));
+};
+
+export const getMonthlySeries = async (req: Request, res: Response) => {
+  res.json(await analytics.getMonthlySeries(range(req.query)));
+};
+
+export const getByCategory = async (req: Request, res: Response) => {
+  res.json(await analytics.getByCategory(range(req.query)));
+};
+
+export const getByProduct = async (req: Request, res: Response) => {
+  res.json(await analytics.getByProduct(range(req.query)));
 };

@@ -16,6 +16,7 @@ export interface PurchaseLine {
     name: string;
     category: string;
     sku?: string;
+    material?: string;
     purity?: string;
     silverWeightGrams: number;
     makingCharge: number;

@@ -73,11 +73,16 @@ export const createExpense = async (data: CreateExpensePayload) => {
     const [newId] = await trx("expenses").insert({
       expense_no: expenseNo,
       category: data.category,
+      supplier_id: data.supplierId ?? null,
+      bill_no: data.billNo ?? null,
+      payment_method: data.paymentMethod ?? null,
+      payment_reference: data.paymentReference ?? null,
+      receipt_document_id: data.receiptDocumentId ?? null,
       amount: data.amount,
-      // Not VAT-registered, so the whole amount is taxable and VAT is zero.
-      // When registration happens this splits properly -- see D2 in the plan.
-      taxable_amount: data.amount,
-      vat_amount: 0,
+      // taxable + vat always add back to `amount`, the gross actually paid.
+      // Not VAT-registered yet, so vat is zero and taxable is the whole figure.
+      taxable_amount: data.vatAmount !== undefined ? data.amount - data.vatAmount : data.amount,
+      vat_amount: data.vatAmount ?? 0,
       spent_at: data.spentAt,
       spent_at_bs: bsDate,
       fiscal_year: fiscalYear,

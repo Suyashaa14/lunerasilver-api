@@ -9,6 +9,13 @@ const router = express.Router();
 router.use(authenticateAdmin);
 
 router.get("/", asyncHandler(controller.listInvoices));
+
+// Analytics, from issued invoices rather than the retired sales table.
+// Declared before /:id so the words are not read as invoice ids.
+router.get("/summary", asyncHandler(controller.getSummary));
+router.get("/monthly", asyncHandler(controller.getMonthlySeries));
+router.get("/by-category", asyncHandler(controller.getByCategory));
+router.get("/by-product", asyncHandler(controller.getByProduct));
 router.post("/", issueInvoiceValidator, asyncHandler(controller.issueInvoice));
 router.get("/:id", asyncHandler(controller.getInvoice));
 router.post("/:id/void", asyncHandler(controller.voidInvoice));

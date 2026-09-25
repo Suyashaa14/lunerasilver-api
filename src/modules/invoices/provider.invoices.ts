@@ -133,3 +133,35 @@ export const getByProduct = async (filters: DateRangeFilters): Promise<ProductPo
   const rows = await query;
   return rows.map((r: any) => ({ name: r.name, count: Number(r.count), revenue: Number(r.revenue) }));
 };
+
+export interface CategoryPoint {
+  category: string;
+  amount: number;
+  count: number;
+}
+
+/**
+ * Sales split by category, from the snapshot on the line rather than a join to
+ * the catalogue -- a piece recategorised today must not move a sale made last
+ * year. Lines written before the snapshot column existed report as "unknown".
+ */
+export const getByCategory = async (filters: DateRangeFilters): Promise<CategoryPoint[]> => {
+  const query = db("invoice_items as ii")
+    .join("invoices as i", "i.id", "ii.invoice_id")
+    .where("i.is_void", false)
+    .where("i.series", "SALES")
+    .groupBy("ii.category_snapshot")
+    .select("ii.category_snapshot as category")
+    .sum({ amount: "ii.line_total" })
+    .count({ count: "ii.id" })
+    .orderBy("amount", "desc");
+
+  if (filters.from) query.where("i.issued_at", ">=", filters.from);
+  if (filters.to) query.where("i.issued_at", "<=", `${filters.to} 23:59:59`);
+
+  return (await query).map((r: any) => ({
+    category: r.category ?? "unknown",
+    amount: Number(r.amount),
+    count: Number(r.count),
+  }));
+};

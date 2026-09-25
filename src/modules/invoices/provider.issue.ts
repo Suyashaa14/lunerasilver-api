@@ -150,6 +150,7 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
           jewelry_id: piece.id,
           name_snapshot: piece.name,
           sku_snapshot: piece.sku,
+          category_snapshot: piece.category,
           image_snapshot: piece.image_url,
           silver_weight_snapshot: piece.silver_weight_grams,
           silver_rate_snapshot: rate,

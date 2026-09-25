@@ -4,6 +4,12 @@ import * as provider from "./provider.expenses";
 import { auditActor } from "../../utils/audit";
 
 const parsePayload = (body: any) => ({
+  supplierId: body.supplierId !== undefined && body.supplierId !== "" ? Number(body.supplierId) : undefined,
+  billNo: body.billNo,
+  vatAmount: body.vatAmount !== undefined && body.vatAmount !== "" ? Number(body.vatAmount) : undefined,
+  paymentMethod: body.paymentMethod,
+  paymentReference: body.paymentReference,
+  receiptDocumentId: body.receiptDocumentId !== undefined && body.receiptDocumentId !== "" ? Number(body.receiptDocumentId) : undefined,
   category: body.category,
   amount: body.amount !== undefined ? Number(body.amount) : undefined,
   spentAt: body.spentAt,
