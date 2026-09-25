@@ -9,6 +9,7 @@ const router = express.Router();
 router.use(authenticateStaff);
 
 router.get("/", asyncHandler(controller.listPayments));
+router.get("/pending-count", asyncHandler(controller.pendingCount));
 router.post("/", recordPaymentValidator, asyncHandler(controller.recordPayment));
 router.post("/refund", refundPaymentValidator, asyncHandler(controller.refundPayment));
 router.get("/balance/:invoiceId", asyncHandler(controller.getInvoiceBalance));

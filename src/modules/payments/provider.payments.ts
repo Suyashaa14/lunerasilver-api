@@ -255,9 +255,34 @@ export const verifyPayment = (id: number, actor: AuditActor) => setStatus(id, "v
 export const rejectPayment = (id: number, actor: AuditActor, reason: string) =>
   setStatus(id, "rejected", actor, reason);
 
-export const listPayments = async (filters: { invoiceId?: number; orderId?: number }) => {
-  const query = db("payments").orderBy("id", "desc");
-  if (filters.invoiceId) query.where({ invoice_id: filters.invoiceId });
-  if (filters.orderId) query.where({ order_id: filters.orderId });
-  return (await query).map(toDTO);
+export const listPayments = async (filters: {
+  invoiceId?: number;
+  orderId?: number;
+  status?: string;
+  limit?: number;
+}) => {
+  const query = db("payments as p")
+    .leftJoin("invoices as i", "i.id", "p.invoice_id")
+    .leftJoin("customers as c", "c.id", "i.customer_id")
+    .orderBy("p.id", "desc")
+    .limit(filters.limit ?? 100)
+    .select("p.*", "i.invoice_no", "c.name as customer_name");
+
+  if (filters.invoiceId) query.where("p.invoice_id", filters.invoiceId);
+  if (filters.orderId) query.where("p.order_id", filters.orderId);
+  if (filters.status) query.where("p.status", filters.status);
+
+  // The invoice number and buyer travel with each row: a queue of bare amounts
+  // cannot be checked against a bank statement.
+  return (await query).map((row: any) => ({
+    ...toDTO(row),
+    invoiceNo: row.invoice_no ?? null,
+    customerName: row.customer_name ?? null,
+  }));
+};
+
+/** How much money is sitting unverified. Drives the badge on the menu. */
+export const pendingCount = async (): Promise<{ count: number; amount: number }> => {
+  const row = await db("payments").where({ status: "pending" }).count({ c: "*" }).sum({ amount: "amount" }).first();
+  return { count: Number((row as any).c), amount: money(Number((row as any).amount ?? 0)) };
 };

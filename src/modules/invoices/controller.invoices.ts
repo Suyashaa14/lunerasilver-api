@@ -63,6 +63,7 @@ export const listInvoices = async (req: Request, res: Response) => {
   res.json(
     await issuer.listInvoices({
       search: req.query.search ? String(req.query.search) : undefined,
+      customerId: req.query.customerId ? Number(req.query.customerId) : undefined,
       from: req.query.from ? String(req.query.from) : undefined,
       to: req.query.to ? String(req.query.to) : undefined,
       includeVoid: req.query.includeVoid === "true",

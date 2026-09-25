@@ -250,6 +250,7 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
 
 export interface InvoiceListFilters {
   search?: string;
+  customerId?: number;
   from?: string;
   to?: string;
   includeVoid?: boolean;
@@ -262,6 +263,7 @@ export const listInvoices = async (filters: InvoiceListFilters) => {
   const base = db("invoices as i").where("i.series", "SALES");
 
   if (!filters.includeVoid) base.where("i.is_void", false);
+  if (filters.customerId) base.where("i.customer_id", filters.customerId);
   if (filters.from) base.where("i.issued_at", ">=", filters.from);
   if (filters.to) base.where("i.issued_at", "<=", `${filters.to} 23:59:59`);
   if (filters.search) {

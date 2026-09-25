@@ -42,6 +42,8 @@ export const listPayments = async (req: Request, res: Response) => {
     await provider.listPayments({
       invoiceId: req.query.invoiceId ? Number(req.query.invoiceId) : undefined,
       orderId: req.query.orderId ? Number(req.query.orderId) : undefined,
+      status: req.query.status ? String(req.query.status) : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
     }),
   );
 };
@@ -50,4 +52,8 @@ export const getInvoiceBalance = async (req: Request, res: Response) => {
   const balance = await provider.getInvoiceBalance(db, Number(req.params.invoiceId));
   if (!balance) return res.status(404).json({ status: false, message: "Invoice not found" });
   res.json(balance);
+};
+
+export const pendingCount = async (_req: Request, res: Response) => {
+  res.json(await provider.pendingCount());
 };
