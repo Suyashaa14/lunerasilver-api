@@ -574,32 +574,64 @@ rounding and drop the fourth argument in `src/utils/pricing.ts`.
 
 ---
 
-## Phase 3 — General ledger
+## Phase 3 — General ledger · `COMPLETE`
 
 **Required** — the company is a Private Limited, so proper books and audited
 statements are a statutory obligation, not a preference. This is the phase that
 earns the name "accounting software".
 
-### Step 3.1 — Chart of accounts · `TODO`
-`accounts` table (code, name, type, parent), seeded with a Nepali small-trader
-chart. **Done when** every account has a type that rolls into P&L or balance sheet.
+### Step 3.1 — Chart of accounts · `DONE`
+`accounts` table plus `seeds/005_chart_of_accounts.ts` — 14 accounts across asset,
+liability, equity, income and expense. Posting rules look accounts up **by code**,
+so changing a code means changing `provider.posting.ts` with it.
 
-### Step 3.2 — Journal entries · `TODO`
-`journal_entries` + `journal_entry_lines`, append-only, with a balance check
-refusing any entry whose debits ≠ credits. **Done when** an unbalanced entry
-cannot be persisted.
+### Step 3.2 — Journal entries · `DONE`
+`journal_entries` + `journal_entry_lines`, both in `APPEND_ONLY_TABLES`. Entries
+are numbered `JV-2083/84-000001` from the same gapless allocator.
 
-### Step 3.3 — Posting rules · `TODO`
-Each document type posts automatically inside its existing transaction: invoice
-→ AR / revenue / VAT payable; payment → bank / AR; purchase → inventory / AP /
-VAT receivable; expense → expense / bank; credit note → reverse. **Done when**
-every financial document produces a balanced entry, and the sum of all entries
-is zero.
+- **Unbalanced entries are refused** by `postEntry`, and an unknown account code
+  is refused rather than silently skipped.
+- A database CHECK enforces that a line is one side or the other, never both.
+- Zero-value lines are dropped, not rejected — a VAT line is legitimately zero
+  while the shop is not registered, and should simply not appear.
+- `POST /api/ledger/entries` allows the manual entries documents cannot express:
+  opening balances, bank charges, the accountant's year-end adjustment.
 
-### Step 3.4 — Period close · `TODO`
-Closing a fiscal year locks it against new entries and freezes the trial
-balance. **Done when** a closed year rejects writes and its trial balance is
-stable across runs.
+### Step 3.3 — Posting rules · `DONE`
+`provider.posting.ts`. Every document posts **inside its own transaction** — a
+sale and its posting are one event, not two.
+
+| Document | Entry |
+|---|---|
+| Invoice | Dr receivable · Cr sales · Cr VAT payable — plus Dr COGS · Cr inventory |
+| Payment | Dr cash/bank/eSewa · Cr receivable (a refund is the same entry reversed) |
+| Credit note | Dr sales · Dr VAT payable · Cr receivable — plus Dr inventory · Cr COGS |
+| Purchase | Dr inventory · Dr VAT receivable · Cr payable · Cr TDS payable |
+| Expense | Dr expense · Dr VAT receivable · Cr cash |
+| Void | the original entry posted back the other way round |
+
+Verified live end to end — bought 2,150, sold 5,551.25, paid, rent 800:
+
+```
+1000 Cash                 5551.25    800.00   4751.25
+1100 Receivable           5551.25   5551.25      0.00
+1200 Inventory            2150.00   2150.00      0.00
+2000 Payable                 0.00   2150.00   2150.00
+4000 Sales                    0.00   5551.25   5551.25
+5000 Cost of goods        2150.00      0.00   2150.00
+6000 Operating expenses    800.00      0.00    800.00
+TOTAL                    16202.50  16202.50   balances
+```
+
+### Step 3.4 — Period close · `DONE`
+`provider.periods.ts`, at `/api/ledger/periods`.
+
+- **A year that does not balance cannot be closed.** Closing it would freeze a
+  wrong trial balance into every later report.
+- Once closed, `assertFiscalYearOpen` refuses every stamped write — invoices,
+  payments, expenses, journal entries alike. Tested.
+- Reopening is deliberately awkward: it demands a reason, and the reason is kept,
+  because an auditor will ask.
 
 ---
 
@@ -679,3 +711,7 @@ production and wastage batches · debit notes · payment accounts ·
 | 2026-09-26 | ⚠ | **Pricing changed**: stone price now included, Rs 50 rounding removed. Customer-facing. |
 | 2026-09-26 | — | **Phase 2 complete.** Cost and margin are real. 60 tests passing. |
 | 2026-09-26 | fix | Tests no longer reset the shared number counter — a leftover row made them collide. |
+| 2026-09-26 | 3.1–3.2 | `accounts`, `journal_entries`, `journal_entry_lines` + 14-account chart. **DONE**. |
+| 2026-09-26 | 3.3 | Every document posts a balanced entry inside its own transaction. **DONE**. |
+| 2026-09-26 | 3.4 | Period close refuses an unbalanced year; reopening needs a reason. **DONE**. |
+| 2026-09-26 | — | **Phase 3 complete.** Double-entry ledger live; 69 tests passing. |

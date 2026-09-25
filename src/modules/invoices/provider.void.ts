@@ -1,6 +1,7 @@
 import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { assertFiscalYearOpen } from "../../utils/fiscalYear";
+import { postReversal } from "../ledger/provider.posting";
 import { getInvoice } from "./provider.issue";
 import { InvoiceDTO } from "./interface/interface.invoices";
 
@@ -60,6 +61,15 @@ export const voidInvoice = async (
         })),
       );
     }
+
+    // The sale did not happen, so its posting is reversed rather than removed.
+    await postReversal(
+      trx,
+      { referenceType: "invoice", referenceId: id },
+      new Date().toISOString().slice(0, 10),
+      `Void of ${existing.invoice_no}: ${reason}`,
+      actor,
+    );
 
     await writeAuditLog(trx, {
       ...actor,

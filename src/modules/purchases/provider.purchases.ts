@@ -1,6 +1,7 @@
 import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { stampForDate } from "../../utils/fiscalYear";
+import { postPurchase } from "../ledger/provider.posting";
 
 const money = (n: number) => Math.round(n * 100) / 100;
 
@@ -186,6 +187,12 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
         });
       }
     }
+
+    await postPurchase(trx, {
+      id: newId, bill_no: payload.billNo, bill_date: payload.billDate,
+      taxable_amount: taxable, vat_amount: vatAmount, tds_amount: tds,
+      total_amount: money(taxable + vatAmount - tds),
+    }, actor);
 
     await writeAuditLog(trx, {
       ...actor,

@@ -2,6 +2,7 @@ import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { allocateNumber } from "../../services/numbering/service.numbering";
 import { stampForDate, assertFiscalYearOpen } from "../../utils/fiscalYear";
+import { postExpense } from "../ledger/provider.posting";
 import { toDateOnly } from "../../utils/date";
 import {
   CreateExpensePayload,
@@ -61,7 +62,7 @@ export const getExpense = async (id: number) => {
   return row ? toDTO(row) : null;
 };
 
-export const createExpense = async (data: CreateExpensePayload) => {
+export const createExpense = async (data: CreateExpensePayload, actor: AuditActor = {}) => {
   const id = await db.transaction(async (trx) => {
     // The number comes from the shared gapless allocator, inside this same
     // transaction: if the insert fails, the number is handed back rather than
@@ -88,6 +89,14 @@ export const createExpense = async (data: CreateExpensePayload) => {
       fiscal_year: fiscalYear,
       note: data.note ?? null,
     });
+
+    await postExpense(trx, {
+      id: newId, expense_no: expenseNo, spent_at: data.spentAt,
+      taxable_amount: data.vatAmount !== undefined ? data.amount - data.vatAmount : data.amount,
+      vat_amount: data.vatAmount ?? 0,
+      amount: data.amount,
+      payment_method: data.paymentMethod ?? null,
+    }, actor);
 
     return newId;
   });

@@ -3,7 +3,7 @@ import type { Knex } from "knex";
 // Fiscal-year lookup and the closed-year guard live in one place.
 export { resolveFiscalYear, FiscalYearMissing, FiscalYearClosed, stampForDate, toBsDate } from "../../utils/fiscalYear";
 
-export type DocumentSeries = "SALES" | "CN" | "PROFORMA" | "EXPENSE" | "ORDER";
+export type DocumentSeries = "SALES" | "CN" | "PROFORMA" | "EXPENSE" | "ORDER" | "JOURNAL";
 
 export class SequenceMissing extends Error {
   status = 400;

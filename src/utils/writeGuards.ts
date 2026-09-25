@@ -24,6 +24,8 @@ export const APPEND_ONLY_TABLES = [
   "orders",
   "order_items",
   "order_status_history",
+  "journal_entries",
+  "journal_entry_lines",
 ];
 
 /**

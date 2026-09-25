@@ -2,6 +2,7 @@ import type { Knex } from "knex";
 import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { stampForDate } from "../../utils/fiscalYear";
+import { postPayment } from "../ledger/provider.posting";
 import {
   RecordPaymentPayload,
   RefundPaymentPayload,
@@ -133,6 +134,15 @@ export const recordPayment = async (payload: RecordPaymentPayload, actor: AuditA
 
     if (payload.orderId) await recomputeOrderPaymentStatus(trx, payload.orderId);
 
+    // Only money against an invoice touches receivables; a deposit on an order
+    // has no receivable to clear yet.
+    if (payload.invoiceId) {
+      await postPayment(trx, {
+        id: newId, amount: money(payload.amount), method: payload.method,
+        received_at: receivedAt, invoice_id: payload.invoiceId,
+      }, actor);
+    }
+
     await writeAuditLog(trx, {
       ...actor,
       action: "create",
@@ -184,6 +194,13 @@ export const refundPayment = async (payload: RefundPaymentPayload, actor: AuditA
     });
 
     if (payload.orderId) await recomputeOrderPaymentStatus(trx, payload.orderId);
+
+    if (payload.invoiceId) {
+      await postPayment(trx, {
+        id: newId, amount: money(-payload.amount), method: payload.method,
+        received_at: receivedAt, invoice_id: payload.invoiceId,
+      }, actor);
+    }
 
     await writeAuditLog(trx, {
       ...actor,

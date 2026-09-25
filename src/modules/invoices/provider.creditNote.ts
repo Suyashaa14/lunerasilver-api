@@ -3,6 +3,7 @@ import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { stampForDate } from "../../utils/fiscalYear";
 import { allocateNumber } from "../../services/numbering/service.numbering";
 import { refundPayment, getInvoiceBalance } from "../payments/provider.payments";
+import { postCreditNote } from "../ledger/provider.posting";
 
 const money = (n: number) => Math.round(n * 100) / 100;
 
@@ -185,6 +186,16 @@ export const issueCreditNote = async (payload: IssueCreditNotePayload, actor: Au
         voided_at: trx.fn.now(),
       });
     }
+
+    const restockedCost = returnedPieces.length
+      ? (await trx("jewelries").whereIn("id", returnedPieces).select("cost_price"))
+          .reduce((sum: number, r: any) => sum + Number(r.cost_price ?? 0), 0)
+      : 0;
+
+    await postCreditNote(trx, {
+      id: newNoteId, credit_note_no: creditNoteNo, issued_at: issuedAt,
+      taxable_amount: subtotal, vat_amount: vatAmount, total_amount: money(subtotal + vatAmount),
+    }, restockedCost, actor);
 
     await writeAuditLog(trx, {
       ...actor,

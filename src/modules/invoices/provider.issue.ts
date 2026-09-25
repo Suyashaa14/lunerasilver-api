@@ -6,6 +6,7 @@ import { stampForDate } from "../../utils/fiscalYear";
 import { allocateNumber } from "../../services/numbering/service.numbering";
 import { findOrCreateByPhone } from "../customers/provider.customers";
 import { getCurrentSilverRatePerGram } from "../settings/provider.settings";
+import { postInvoice } from "../ledger/provider.posting";
 import { IssueInvoicePayload, InvoiceDTO, InvoiceItemDTO } from "./interface/interface.invoices";
 
 /** Statuses a piece can be sold from. Anything else is already gone. */
@@ -215,6 +216,22 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
         reference_id: newInvoiceId,
         created_by: actor.userId ?? null,
       })),
+    );
+
+    // The ledger entry is written inside this same transaction: a sale and its
+    // posting are one event. If either fails, neither happened.
+    await postInvoice(
+      trx,
+      {
+        id: newInvoiceId,
+        invoice_no: invoiceNo,
+        issued_at: issuedAt,
+        taxable_amount: subtotal,
+        vat_amount: vatAmount,
+        total_amount: money(subtotal + vatAmount),
+      },
+      lines.reduce((sum, l) => sum + Number(l.piece.cost_price ?? 0), 0),
+      actor,
     );
 
     await writeAuditLog(trx, {
