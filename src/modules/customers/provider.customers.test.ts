@@ -4,6 +4,8 @@ import db, { unguardedDb } from "../../utils/db";
 import { findOrCreateByPhone, normalizePhone, createCustomer, updateCustomer } from "./provider.customers";
 
 const MARK = "__cust_test__";
+// Unique per run, so a number used elsewhere in the database cannot collide.
+const TEST_PHONE = `98${String(Date.now()).slice(-8)}`;
 import { actor, resolveActor } from "../../utils/testActor";
 
 const cleanup = async () => {
@@ -34,16 +36,16 @@ test("phone numbers are stripped to digits before matching", () => {
 // The point of the step: a repeat visit must not create a second record.
 test("the same phone returns the same customer, however it is typed", async () => {
   const first = await db.transaction((trx) =>
-    findOrCreateByPhone(trx, { name: `${MARK} Rita`, phone: "9800000001" }, actor),
+    findOrCreateByPhone(trx, { name: `${MARK} Rita`, phone: TEST_PHONE }, actor),
   );
   const second = await db.transaction((trx) =>
-    findOrCreateByPhone(trx, { name: `${MARK} Rita again`, phone: "980-000 0001" }, actor),
+    findOrCreateByPhone(trx, { name: `${MARK} Rita again`, phone: `${TEST_PHONE.slice(0, 3)}-${TEST_PHONE.slice(3, 6)} ${TEST_PHONE.slice(6)}` }, actor),
   );
 
   assert.equal(second.id, first.id, "a repeat visit created a duplicate customer");
   assert.equal(second.name, `${MARK} Rita`, "the existing record should not be overwritten");
 
-  const count = await unguardedDb("customers").where({ phone: "9800000001" }).count({ c: "*" }).first();
+  const count = await unguardedDb("customers").where({ phone: TEST_PHONE }).count({ c: "*" }).first();
   assert.equal(Number((count as any).c), 1);
 });
 

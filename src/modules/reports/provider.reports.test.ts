@@ -159,3 +159,25 @@ test("P&L revenue equals the sales register equals collected plus outstanding", 
   assert.equal(check.salesRegisterTaxable, check.collectedPlusOutstanding);
   assert.ok(check.agrees, JSON.stringify(check));
 });
+
+// A document must never be stamped in the future. It was: the issue time was
+// built from a local clock reading while the connection runs in UTC, so every
+// invoice landed 5h45m ahead in Nepal and every "as at now" filter skipped it.
+// Aged receivables silently reported nothing owed.
+test("an invoice issued now is not dated in the future", async () => {
+  const invoice = await sell();
+  const row = await unguardedDb("invoices").where({ id: invoice.id }).first("issued_at");
+  assert.ok(
+    new Date(row.issued_at).getTime() <= Date.now() + 1000,
+    `invoice is dated ${new Date(row.issued_at).toISOString()}, now is ${new Date().toISOString()}`,
+  );
+});
+
+test("a part-paid invoice shows up as owed", async () => {
+  const invoice = await sell();
+  await recordPayment({ invoiceId: invoice.id, amount: 1000, method: "cash" }, actor);
+
+  const aged = await agedReceivables();
+  assert.equal(aged.total, invoice.totalAmount - 1000, "the unpaid remainder must appear in aged receivables");
+  assert.equal(aged.items.length, 1);
+});

@@ -7,6 +7,18 @@ import { postCreditNote } from "../ledger/provider.posting";
 
 const money = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * A timestamp for a document dated `dateOnly` (YYYY-MM-DD).
+ *
+ * Today's documents get the actual current instant. Back-dated ones get the
+ * start of that day. Never a locally-formatted time string: the connection runs
+ * in UTC, so a local clock reading would be stored as though it were UTC and
+ * land the document hours in the future.
+ */
+const timestampFor = (dateOnly: string): Date | string =>
+  dateOnly === new Date().toISOString().slice(0, 10) ? new Date() : `${dateOnly} 00:00:00`;
+
+
 export interface CreditNoteLine {
   invoiceItemId: number;
   /** Defaults to the whole line. */
@@ -127,7 +139,7 @@ export const issueCreditNote = async (payload: IssueCreditNotePayload, actor: Au
       invoice_id: payload.invoiceId,
       customer_id: invoice.customer_id,
       reason: payload.reason,
-      issued_at: `${issuedAt} ${new Date().toTimeString().slice(0, 8)}`,
+      issued_at: timestampFor(issuedAt),
       issued_date_bs: bsDate,
       subtotal,
       discount: 0,

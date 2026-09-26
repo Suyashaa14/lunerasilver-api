@@ -9,6 +9,18 @@ import { getCurrentSilverRatePerGram } from "../settings/provider.settings";
 import { postInvoice } from "../ledger/provider.posting";
 import { IssueInvoicePayload, InvoiceDTO, InvoiceItemDTO } from "./interface/interface.invoices";
 
+
+/**
+ * A timestamp for a document dated `dateOnly` (YYYY-MM-DD).
+ *
+ * Today's documents get the actual current instant. Back-dated ones get the
+ * start of that day. Never a locally-formatted time string: the connection runs
+ * in UTC, so a local clock reading would be stored as though it were UTC and
+ * land the document hours in the future.
+ */
+const timestampFor = (dateOnly: string): Date | string =>
+  dateOnly === new Date().toISOString().slice(0, 10) ? new Date() : `${dateOnly} 00:00:00`;
+
 /** Statuses a piece can be sold from. Anything else is already gone. */
 const SELLABLE = ["available", "reserved"];
 
@@ -179,7 +191,7 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
       series: "SALES",
       order_id: payload.orderId ?? null,
       customer_id: customerId,
-      issued_at: `${issuedAt} ${new Date().toTimeString().slice(0, 8)}`,
+      issued_at: timestampFor(issuedAt),
       issued_date_bs: bsDate,
       // Snapshots, not joins: renaming the shop or the buyer later must not
       // rewrite a document already handed over.
