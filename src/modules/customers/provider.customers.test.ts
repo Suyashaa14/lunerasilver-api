@@ -92,3 +92,27 @@ test("create and update write audit rows", async () => {
     .orderBy("id");
   assert.deepEqual(rows.map((r: any) => r.action), ["create", "update"]);
 });
+
+// The address is taken at the counter, often on a later visit than the first.
+// It has to land on the record that already exists, or the invoice prints "-".
+test("a repeat buyer's blank details are filled in, and filled ones are left alone", async () => {
+  const phone = `98${String(Date.now()).slice(-8)}`;
+
+  const first = await db.transaction((trx) =>
+    findOrCreateByPhone(trx, { name: `${MARK} Bimala`, phone }, actor),
+  );
+  assert.equal(first.addressLine, null);
+
+  const second = await db.transaction((trx) =>
+    findOrCreateByPhone(trx, { name: `${MARK} Bimala`, phone, addressLine: "Jhamsikhel, Ward 3" }, actor),
+  );
+  assert.equal(second.id, first.id, "a second record was created");
+  assert.equal(second.addressLine, "Jhamsikhel, Ward 3");
+
+  // A correction lives on the customer record. A later sale must not undo it.
+  await updateCustomer(first.id, { addressLine: "Corrected address" }, actor);
+  const third = await db.transaction((trx) =>
+    findOrCreateByPhone(trx, { name: `${MARK} Bimala`, phone, addressLine: "Jhamsikhel, Ward 3" }, actor),
+  );
+  assert.equal(third.addressLine, "Corrected address", "a stored address was overwritten by the counter");
+});

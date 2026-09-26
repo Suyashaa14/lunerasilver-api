@@ -139,7 +139,31 @@ export const findOrCreateByPhone = async (
 
   if (phone) {
     const existing = await conn("customers").where({ phone }).orderBy("id", "desc").first();
-    if (existing) return toDTO(existing);
+    if (existing) {
+      // A repeat buyer keeps the record they already have, but details taken at
+      // the counter this time are worth keeping. Only blanks are filled -- never
+      // an overwrite, because the stored value may be the corrected one.
+      const fill: Record<string, string> = {};
+      const blank = (v: unknown) => v === null || v === undefined || String(v).trim() === "";
+      if (blank(existing.address_line) && !blank(data.addressLine)) fill.address_line = data.addressLine as string;
+      if (blank(existing.city) && !blank(data.city)) fill.city = data.city as string;
+      if (blank(existing.email) && !blank(data.email)) fill.email = data.email as string;
+      if (blank(existing.pan) && !blank(data.pan)) fill.pan = data.pan as string;
+
+      if (Object.keys(fill).length === 0) return toDTO(existing);
+
+      await conn("customers").where({ id: existing.id }).update(fill);
+      if ((conn as Knex.Transaction).isTransaction) {
+        await writeAuditLog(conn as Knex.Transaction, {
+          ...actor,
+          action: "update",
+          entityType: "customers",
+          entityId: existing.id,
+          newValues: fill,
+        });
+      }
+      return toDTO(await conn("customers").where({ id: existing.id }).first());
+    }
   }
 
   const [id] = await conn("customers").insert({ ...toRow(data), phone, user_id: data.userId ?? null });
