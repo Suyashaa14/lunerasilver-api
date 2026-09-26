@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { unguardedDb } from "../../utils/db";
-import { listJewelries, retireJewelry, restoreJewelry } from "./provider.jewelries";
+import { listJewelries, retireJewelry, restoreJewelry, createJewelry, updateJewelry } from "./provider.jewelries";
 import { actor, resolveActor } from "../../utils/testActor";
 
 const MARK = "__jw_pub_test__";
@@ -77,4 +77,49 @@ test("a piece on the shelf cannot be restored, and a sold one needs a credit not
 
   const sold = await unguardedDb("jewelries").where({ sku: `${MARK}-sold` }).first("id");
   await assert.rejects(restoreJewelry(sold.id, "no", actor), /credit note/);
+});
+
+// --- Adding a piece by hand --------------------------------------------------
+
+// sku is NOT NULL and UNIQUE, and createJewelry never set it, so every attempt
+// to add a piece by hand failed outright with a database error.
+test("a piece added by hand gets a code, and keeps what was typed", async () => {
+  const made: number[] = [];
+  try {
+    const a = await createJewelry({
+      name: `${MARK} By Hand`, category: "rings", silverWeightGrams: 5,
+      pricingMode: "makingCharge", makingCharge: 100, purity: "999", material: "Silver",
+    } as any);
+    made.push(a!.id);
+    assert.match(a!.sku!, /^RIN-\d{4}$/, "a code is generated from the category");
+    assert.equal(a!.purity, "999");
+    assert.equal(a!.material, "Silver");
+
+    // A second piece must not collide with the first.
+    const b = await createJewelry({
+      name: `${MARK} By Hand 2`, category: "rings", silverWeightGrams: 5,
+      pricingMode: "makingCharge", makingCharge: 100, purity: "98%",
+    } as any);
+    made.push(b!.id);
+    assert.notEqual(b!.sku, a!.sku);
+
+    // Any purity the shop types is kept as typed.
+    const edited = await updateJewelry(a!.id, { purity: "92.5%" } as any);
+    assert.equal(edited!.purity, "92.5%");
+    assert.equal(edited!.sku, a!.sku, "the code must survive an edit; it is on the tag");
+
+    // An edit that does not mention purity must not wipe it.
+    const renamed = await updateJewelry(a!.id, { name: `${MARK} Renamed` } as any);
+    assert.equal(renamed!.purity, "92.5%");
+
+    await assert.rejects(
+      createJewelry({
+        name: `${MARK} Clash`, category: "rings", silverWeightGrams: 5,
+        pricingMode: "makingCharge", makingCharge: 100, sku: a!.sku,
+      } as any),
+      /already uses the code/,
+    );
+  } finally {
+    if (made.length > 0) await unguardedDb("jewelries").whereIn("id", made).del();
+  }
 });

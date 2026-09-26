@@ -18,6 +18,9 @@ const toDTO = (row: any, rate: number): JewelryDTO => {
   return {
     id: row.id,
     name: row.name,
+    sku: row.sku ?? null,
+    material: row.material ?? null,
+    purity: row.purity ?? null,
     category: row.category,
     imageUrl: row.image_url,
     silverWeightGrams: silverWeight,

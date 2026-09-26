@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyToken } from "../utils/auth";
+import db from "../utils/db";
 
 // Paths under /api that must answer without a token. Everything else is
 // rejected by authGate before it reaches a route handler. Login and signup are
@@ -29,8 +30,15 @@ const readBearerToken = (req: Request): string | undefined => {
  * Public routes stay reachable: with no token they pass straight through, and a
  * token that fails to verify is discarded rather than rejected, so a visitor
  * holding a stale token can still browse the storefront as a guest.
+ *
+ * The account behind the token is looked up on every request, not trusted from
+ * the token alone. A signed token outlives the account it names: one issued to
+ * a user who has since been deactivated would otherwise keep full access until
+ * it expired, and one naming a user who no longer exists used to sail through
+ * the gate and fail much later, deep inside a write, as an unexplained foreign
+ * key error. Both are a dead session, and this is where that is decided.
  */
-export const authGate = (req: Request, res: Response, next: NextFunction) => {
+export const authGate = async (req: Request, res: Response, next: NextFunction) => {
   const token = readBearerToken(req);
   const publicRoute = isPublic(req.method, req.path);
 
@@ -39,12 +47,31 @@ export const authGate = (req: Request, res: Response, next: NextFunction) => {
     return res.status(401).json({ status: false, message: "Not authenticated" });
   }
 
-  try {
-    req.user = verifyToken(token);
-    return next();
-  } catch {
+  const reject = (message: string) => {
     if (publicRoute) return next();
-    return res.status(401).json({ status: false, message: "Invalid or expired session" });
+    return res.status(401).json({ status: false, message });
+  };
+
+  let claims: NonNullable<Request["user"]>;
+  try {
+    claims = verifyToken(token);
+  } catch {
+    return reject("Invalid or expired session");
+  }
+
+  try {
+    const account = await db("users").where({ id: claims.id }).first("id", "role", "is_active");
+
+    if (!account || !account.is_active) {
+      return reject("Your session is no longer valid. Please sign in again.");
+    }
+
+    // The role is taken from the account, not the token, so a change of role
+    // takes effect on the next request rather than at the next sign-in.
+    req.user = { ...claims, role: account.role };
+    return next();
+  } catch (err) {
+    return next(err);
   }
 };
 

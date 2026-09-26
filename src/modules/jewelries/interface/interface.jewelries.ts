@@ -18,6 +18,9 @@ export type UpdateJewelryPayload = Partial<CreateJewelryPayload>;
 export interface JewelryDTO {
   id: number;
   name: string;
+  sku: string | null;
+  material: string | null;
+  purity: string | null;
   category: string;
   imageUrl: string | null;
   silverWeightGrams: number;
