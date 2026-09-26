@@ -852,3 +852,44 @@ the ledger.
 **Nothing has to be rewritten if registration happens later.** Flip the flag and
 later entries start splitting the tax out. Entries already posted stay as posted,
 which is correct: you could not have reclaimed that tax at the time.
+
+---
+
+## Skill promotion levy — 0.5% charged on top of a sale
+
+Added 2026-09-26. The buyer pays it, the shop holds it, it is owed onward.
+
+| Where | What |
+|---|---|
+| `business_profile.skill_promo_rate` | The rate, default `0.50`. Change it here, not in code. |
+| `invoices.skill_promo_rate` / `.skill_promo_amount` | Snapshotted per document. Existing invoices default to `0` and keep their original total. |
+| `credit_notes.skill_promo_amount` | Given back with the goods. |
+| Account `2300` | *Skill promotion levy payable* — a liability, never income. |
+
+**Charged on the goods after any discount**, so the buyer pays it on what they
+actually paid for the jewellery.
+
+```
+Dr Accounts receivable   total
+  Cr Sales                       goods after discount
+  Cr VAT payable                 VAT (0 while PAN-only)
+  Cr Skill promotion levy        0.5% of the goods
+```
+
+**Voiding** reverses it automatically — `postReversal` copies every line of the
+original entry and swaps the sides, so it needed no change.
+
+**Credit notes** give it back in proportion to the goods credited, and the
+credit that finally empties an invoice hands back whatever levy is left. That
+last rule is what stops rounding stranding a few paise in account 2300 when a
+sale is credited in two parts.
+
+**`reconciliation()` subtracts the net levy** before comparing revenue three
+ways. Without that, every sale would make the books look wrong by exactly 0.5%:
+the levy is in what the customer paid and in what they still owe, but it is not
+revenue.
+
+**Totals now routinely carry paise.** 0.5% of 4,461 is 22.31. Screens that show
+the arithmetic use the two-decimal formatter so the column adds up. If whole
+rupees are wanted at the counter, the levy would have to be rounded at issue
+time — a money decision, not a display one.
