@@ -10,6 +10,21 @@ const router = express.Router();
 // Who has access is the owner's call, never staff's.
 router.use(authenticateAdmin);
 
+router.post(
+  "/",
+  [
+    body("name").isString().trim().notEmpty().withMessage("Name is required"),
+    body("email").isEmail().withMessage("A valid email is required"),
+    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 characters"),
+    body("role").isIn(["admin", "staff"]).withMessage("role must be admin or staff"),
+  ],
+  asyncHandler(async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ status: false, errors: errors.array() });
+    res.status(201).json(await provider.createUser(req.body, auditActor(req)));
+  }),
+);
+
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   res.json(await provider.listUsers(req.query.includeInactive === "true"));
 }));

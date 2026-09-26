@@ -1,4 +1,5 @@
 import db from "../../utils/db";
+import { hashPassword } from "../../utils/password";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 
 export interface UserDTO {
@@ -95,4 +96,45 @@ export const anonymise = async (id: number, actor: AuditActor) => {
   });
 
   return toDTO(await db("users").where({ id }).first());
+};
+
+/**
+ * Creates a staff or admin account directly.
+ *
+ * Deliberately separate from public signup, which only ever makes a customer.
+ * Access to the shop's books is granted by the owner, never claimed by
+ * whoever fills in a form.
+ */
+export const createUser = async (
+  data: { name: string; email: string; password: string; role: "admin" | "staff" },
+  actor: AuditActor,
+) => {
+  const existing = await db("users").where({ email: data.email }).first("id");
+  if (existing) {
+    throw Object.assign(new Error("That email already has an account"), { status: 409 });
+  }
+
+  const id = await db.transaction(async (trx) => {
+    const [newId] = await trx("users").insert({
+      name: data.name,
+      email: data.email,
+      password_hash: await hashPassword(data.password),
+      role: data.role,
+      is_active: true,
+    });
+
+    await writeAuditLog(trx, {
+      ...actor,
+      action: "create",
+      entityType: "users",
+      entityId: newId,
+      // The password is redacted by writeAuditLog, but it is never passed here anyway.
+      newValues: { name: data.name, email: data.email, role: data.role },
+    });
+
+    return newId;
+  });
+
+  const row = await db("users").where({ id }).first();
+  return toDTO(row);
 };

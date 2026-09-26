@@ -15,8 +15,17 @@ const money = (n: number) => Math.round(n * 100) / 100;
  * in UTC, so a local clock reading would be stored as though it were UTC and
  * land the document hours in the future.
  */
-const timestampFor = (dateOnly: string): Date | string =>
-  dateOnly === new Date().toISOString().slice(0, 10) ? new Date() : `${dateOnly} 00:00:00`;
+const timestampFor = (dateOnly: string): Date | string => {
+  if (dateOnly !== new Date().toISOString().slice(0, 10)) return `${dateOnly} 00:00:00`;
+
+  // Milliseconds are dropped deliberately. The column holds whole seconds and
+  // MySQL *rounds* fractional ones rather than truncating, so a document saved
+  // at .900 would be stored a second into the future -- enough for an "as at
+  // now" report to skip it, intermittently and only sometimes.
+  const now = new Date();
+  now.setMilliseconds(0);
+  return now;
+};
 
 
 export interface CreditNoteLine {
