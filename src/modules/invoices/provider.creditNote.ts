@@ -61,6 +61,7 @@ export const getCreditNote = async (id: number) => {
     subtotal: Number(note.subtotal),
     taxableAmount: Number(note.taxable_amount),
     vatAmount: Number(note.vat_amount),
+    skillPromoAmount: Number(note.skill_promo_amount ?? 0),
     totalAmount: Number(note.total_amount),
     items: items.map((i: any) => ({
       id: i.id,
@@ -142,6 +143,35 @@ export const issueCreditNote = async (payload: IssueCreditNotePayload, actor: Au
     const subtotal = money(lines.reduce((s, l) => s + l.amount, 0));
     const vatAmount = money(lines.reduce((s, l) => s + l.vatShare, 0));
 
+    // The invoice only goes void once every line has been credited in full.
+    const allLines = invoiceItems.map((i: any) => Number(i.id));
+    const creditedNow = new Map(creditedSoFar);
+    for (const l of lines) creditedNow.set(Number(l.item.id), (creditedSoFar.get(Number(l.item.id)) ?? 0) + l.amount);
+    const wholeInvoiceCredited = allLines.every(
+      (lineId) => (creditedNow.get(lineId) ?? 0) >= Number(byId.get(lineId).line_total),
+    );
+
+    // The levy follows the goods. A part credit gives back the same proportion
+    // of it; the credit that finally empties the invoice gives back whatever is
+    // left, so however the note is split the levy account nets back to zero.
+    const invoiceLevy = Number(invoice.skill_promo_amount ?? 0);
+    const invoiceTaxable = Number(invoice.taxable_amount);
+    const levyAlreadyCredited = Number(
+      (
+        await trx("credit_notes")
+          .where({ invoice_id: payload.invoiceId })
+          .sum({ s: "skill_promo_amount" })
+          .first()
+      )?.s ?? 0,
+    );
+    const skillPromoAmount = wholeInvoiceCredited
+      ? money(invoiceLevy - levyAlreadyCredited)
+      : invoiceTaxable > 0
+        ? money(invoiceLevy * (subtotal / invoiceTaxable))
+        : 0;
+
+    const totalAmount = money(subtotal + vatAmount + skillPromoAmount);
+
     const [newNoteId] = await trx("credit_notes").insert({
       credit_note_no: creditNoteNo,
       fiscal_year: fiscalYear,
@@ -154,7 +184,8 @@ export const issueCreditNote = async (payload: IssueCreditNotePayload, actor: Au
       discount: 0,
       taxable_amount: subtotal,
       vat_amount: vatAmount,
-      total_amount: money(subtotal + vatAmount),
+      skill_promo_amount: skillPromoAmount,
+      total_amount: totalAmount,
       created_by: actor.userId ?? null,
     });
 
@@ -191,14 +222,6 @@ export const issueCreditNote = async (payload: IssueCreditNotePayload, actor: Au
       );
     }
 
-    // The invoice only goes void once every line has been credited in full.
-    const allLines = invoiceItems.map((i: any) => Number(i.id));
-    const creditedNow = new Map(creditedSoFar);
-    for (const l of lines) creditedNow.set(Number(l.item.id), (creditedSoFar.get(Number(l.item.id)) ?? 0) + l.amount);
-    const wholeInvoiceCredited = allLines.every(
-      (lineId) => (creditedNow.get(lineId) ?? 0) >= Number(byId.get(lineId).line_total),
-    );
-
     if (wholeInvoiceCredited) {
       await trx("invoices").where({ id: payload.invoiceId }).update({
         is_void: true,
@@ -215,7 +238,8 @@ export const issueCreditNote = async (payload: IssueCreditNotePayload, actor: Au
 
     await postCreditNote(trx, {
       id: newNoteId, credit_note_no: creditNoteNo, issued_at: issuedAt,
-      taxable_amount: subtotal, vat_amount: vatAmount, total_amount: money(subtotal + vatAmount),
+      taxable_amount: subtotal, vat_amount: vatAmount,
+      skill_promo_amount: skillPromoAmount, total_amount: totalAmount,
     }, restockedCost, actor);
 
     await writeAuditLog(trx, {
@@ -223,7 +247,7 @@ export const issueCreditNote = async (payload: IssueCreditNotePayload, actor: Au
       action: "create",
       entityType: "credit_notes",
       entityId: newNoteId,
-      newValues: { credit_note_no: creditNoteNo, invoice_id: payload.invoiceId, total_amount: money(subtotal + vatAmount) },
+      newValues: { credit_note_no: creditNoteNo, invoice_id: payload.invoiceId, total_amount: totalAmount },
     });
 
     return newNoteId;

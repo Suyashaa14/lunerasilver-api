@@ -331,9 +331,28 @@ export const reconciliation = async (range: Range) => {
     return Number(((await q.first()) as any)?.amount ?? 0);
   })();
 
+  // The skill promotion levy is collected from the buyer and owed onward, so it
+  // is in what they paid and in what they still owe, but it is not revenue. It
+  // has to come back out before these three can be compared, or the books would
+  // look wrong by exactly the levy on every sale.
+  const levyOn = async (table: "invoices" | "credit_notes") => {
+    const q =
+      table === "invoices"
+        ? db("invoices as i").where("i.series", "SALES").sum({ amount: "i.skill_promo_amount" })
+        : db("credit_notes as c")
+            .join("invoices as i", "i.id", "c.invoice_id")
+            .sum({ amount: "c.skill_promo_amount" });
+    q.where("i.is_void", false);
+    if (range.fiscalYear) q.where("i.fiscal_year", range.fiscalYear);
+    if (range.from) q.where("i.issued_at", ">=", range.from);
+    if (range.to) q.where("i.issued_at", "<=", `${range.to} 23:59:59`);
+    return Number(((await q.first()) as any)?.amount ?? 0);
+  };
+  const netLevy = money((await levyOn("invoices")) - (await levyOn("credit_notes")));
+
   const plRevenue = pl.totalIncome;
   const registerTotal = register.totalTaxable;
-  const collectedPlusOwed = money(collected + receivables.total);
+  const collectedPlusOwed = money(collected + receivables.total - netLevy);
 
   return {
     profitAndLossRevenue: plRevenue,

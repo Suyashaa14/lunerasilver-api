@@ -52,6 +52,9 @@ export interface InvoiceDTO {
   taxableAmount: number;
   vatAmount: number;
   vatRate: number;
+  /** The skill promotion levy charged on top, and the rate it was charged at. */
+  skillPromoRate: number;
+  skillPromoAmount: number;
   totalAmount: number;
   paymentMethod: string;
   isVoid: boolean;

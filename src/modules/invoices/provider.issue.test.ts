@@ -6,6 +6,11 @@ import { issueInvoice, getInvoice } from "./provider.issue";
 const MARK = "__inv_test__";
 import { actor, resolveActor } from "../../utils/testActor";
 
+// Totals carry paise once the levy is on them, so comparisons round the same
+// way the money columns do.
+const money = (n: number) => Math.round(n * 100) / 100;
+
+
 let jewelryId = 0;
 let secondPieceId = 0;
 
@@ -66,7 +71,16 @@ test("issuing writes the document, the stock row and the audit row together", as
   // The spec's reconciliation rule: the lines must add up to the subtotal.
   const lineSum = invoice.items.reduce((s, i) => s + i.lineTotal, 0);
   assert.equal(lineSum, invoice.subtotal);
-  assert.equal(invoice.taxableAmount + invoice.vatAmount, invoice.totalAmount);
+  // The buyer owes the goods, any VAT, and the skill promotion levy on top.
+  assert.equal(
+    money(invoice.taxableAmount + invoice.vatAmount + invoice.skillPromoAmount),
+    invoice.totalAmount,
+  );
+  assert.equal(
+    invoice.skillPromoAmount,
+    money((invoice.taxableAmount * invoice.skillPromoRate) / 100),
+    "the levy must be the stored rate applied to the goods",
+  );
 
   const piece = await unguardedDb("jewelries").where({ id: jewelryId }).first();
   assert.equal(piece.status, "sold");

@@ -7,6 +7,11 @@ import { recordPayment, refundPayment, verifyPayment, getInvoiceBalance } from "
 
 const MARK = "__pay_test__";
 import { actor, resolveActor } from "../../utils/testActor";
+
+// Totals carry paise once the levy is on them, so comparisons round the same
+// way the money columns do.
+const money = (n: number) => Math.round(n * 100) / 100;
+
 let jewelryId = 0;
 
 const wipe = async () => {
@@ -62,10 +67,10 @@ test("part payments add up and the balance follows", async () => {
 
   let balance = (await getInvoiceBalance(db, invoice.id))!;
   assert.equal(balance.paid, 1000);
-  assert.equal(balance.outstanding, invoice.totalAmount - 1000);
+  assert.equal(balance.outstanding, money(invoice.totalAmount - 1000));
   assert.equal(balance.isSettled, false);
 
-  await recordPayment({ invoiceId: invoice.id, amount: invoice.totalAmount - 1000, method: "cash" }, actor);
+  await recordPayment({ invoiceId: invoice.id, amount: money(invoice.totalAmount - 1000), method: "cash" }, actor);
   balance = (await getInvoiceBalance(db, invoice.id))!;
   assert.equal(balance.outstanding, 0);
   assert.equal(balance.isSettled, true);
@@ -158,7 +163,9 @@ test("a part credit leaves the invoice standing and the piece with the customer"
     actor,
   );
 
-  assert.equal(note!.totalAmount, 200);
+  // 200 of jewellery given back, plus the levy that was charged on it.
+  assert.equal(note!.skillPromoAmount, 1);
+  assert.equal(note!.totalAmount, 201);
   const after = await unguardedDb("invoices").where({ id: invoice.id }).first();
   assert.equal(Boolean(after.is_void), false, "a part credit must not void the invoice");
   assert.equal((await unguardedDb("jewelries").where({ id: jewelryId }).first()).status, "sold");

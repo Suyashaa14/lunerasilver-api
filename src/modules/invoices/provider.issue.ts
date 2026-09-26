@@ -70,6 +70,8 @@ const toDTO = (invoice: any, items: any[]): InvoiceDTO => ({
   taxableAmount: Number(invoice.taxable_amount),
   vatAmount: Number(invoice.vat_amount),
   vatRate: Number(invoice.vat_rate),
+  skillPromoRate: Number(invoice.skill_promo_rate ?? 0),
+  skillPromoAmount: Number(invoice.skill_promo_amount ?? 0),
   totalAmount: Number(invoice.total_amount),
   paymentMethod: invoice.payment_method,
   isVoid: Boolean(invoice.is_void),
@@ -194,6 +196,13 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
     const discount = money(lines.reduce((sum, l) => sum + l.row.discount, 0));
     const vatAmount = money(lines.reduce((sum, l) => sum + l.row.vat_amount, 0));
 
+    // The skill promotion levy is charged on the goods after any discount --
+    // the buyer pays it on what they actually pay for the jewellery, not on a
+    // price nobody was charged. The rate is snapshotted with the amount.
+    const skillPromoRate = Number(business.skill_promo_rate ?? 0);
+    const skillPromoAmount = money((subtotal * skillPromoRate) / 100);
+    const totalAmount = money(subtotal + vatAmount + skillPromoAmount);
+
     const [newInvoiceId] = await trx("invoices").insert({
       invoice_no: invoiceNo,
       fiscal_year: fiscalYear,
@@ -214,8 +223,10 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
       discount,
       taxable_amount: subtotal,
       vat_amount: vatAmount,
-      total_amount: money(subtotal + vatAmount),
       vat_rate: vatRate,
+      skill_promo_rate: skillPromoRate,
+      skill_promo_amount: skillPromoAmount,
+      total_amount: totalAmount,
       payment_method: payload.paymentMethod,
       created_by: actor.userId ?? null,
     });
@@ -249,7 +260,8 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
         issued_at: issuedAt,
         taxable_amount: subtotal,
         vat_amount: vatAmount,
-        total_amount: money(subtotal + vatAmount),
+        skill_promo_amount: skillPromoAmount,
+        total_amount: totalAmount,
       },
       lines.reduce((sum, l) => sum + Number(l.piece.cost_price ?? 0), 0),
       actor,
@@ -260,7 +272,7 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
       action: "create",
       entityType: "invoices",
       entityId: newInvoiceId,
-      newValues: { invoice_no: invoiceNo, customer_id: customerId, total_amount: money(subtotal + vatAmount) },
+      newValues: { invoice_no: invoiceNo, customer_id: customerId, total_amount: totalAmount },
     });
 
     return newInvoiceId;

@@ -19,6 +19,9 @@ export const ACCOUNTS: { code: string; name: string; type: string }[] = [
   { code: "2000", name: "Accounts payable", type: "liability" },
   { code: "2100", name: "VAT payable (output)", type: "liability" },
   { code: "2200", name: "TDS payable", type: "liability" },
+  // Charged on top of a sale and owed onward, so it is a liability the shop
+  // holds -- never its own income.
+  { code: "2300", name: "Skill promotion levy payable", type: "liability" },
 
   { code: "3000", name: "Owner's equity", type: "equity" },
   { code: "3900", name: "Retained earnings", type: "equity" },

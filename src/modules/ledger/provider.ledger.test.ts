@@ -143,7 +143,10 @@ test("after a full trading cycle the books balance to the rupee", async () => {
   }, actor);
   const invoice = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
   await recordPayment({ invoiceId: invoice.id, amount: 1000, method: "cash" }, actor);
-  await recordPayment({ invoiceId: invoice.id, amount: invoice.totalAmount - 1000, method: "bank_transfer" }, actor);
+  await recordPayment(
+    { invoiceId: invoice.id, amount: Math.round((invoice.totalAmount - 1000) * 100) / 100, method: "bank_transfer" },
+    actor,
+  );
 
   const tb = await trialBalance({});
   assert.equal(tb.totalDebit, tb.totalCredit, `debits ${tb.totalDebit} vs credits ${tb.totalCredit}`);
@@ -209,4 +212,48 @@ test("VAT registered: the same bill splits the tax out as reclaimable", async ()
   assert.equal(Number(piece.cost_price), 1000, "reclaimable tax is not a cost");
 
   await unguardedDb("business_profile").update({ is_vat_registered: false });
+});
+
+// --- Skill promotion levy ----------------------------------------------------
+
+// The levy is charged on top of the goods and owed onward, so it must never
+// reach the sales account, and a sale given back in full must leave nothing
+// sitting in it.
+test("the levy is charged on top, kept out of sales, and given back in full", async () => {
+  const invoice = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+
+  const expected = Math.round(invoice.taxableAmount * 0.5) / 100;
+  assert.equal(invoice.skillPromoRate, 0.5);
+  assert.equal(invoice.skillPromoAmount, expected, "0.5% of the goods");
+  assert.equal(invoice.totalAmount, Math.round((invoice.taxableAmount + expected) * 100) / 100);
+
+  const afterSale = new Map((await trialBalance({})).rows.map((r) => [r.code, r]));
+  assert.equal(afterSale.get("2300")!.balance, expected, "the levy is owed onward");
+  assert.equal(afterSale.get("4000")!.balance, invoice.taxableAmount, "the levy must not be revenue");
+
+  const note = await issueCreditNote({ invoiceId: invoice.id, reason: "returned" }, actor);
+  assert.equal(note!.skillPromoAmount, expected, "a full credit gives the levy back too");
+
+  const afterCredit = new Map((await trialBalance({})).rows.map((r) => [r.code, r]));
+  assert.equal(afterCredit.get("2300")?.balance ?? 0, 0, "nothing should still be owed onward");
+  assert.equal(afterCredit.get("1100")?.balance ?? 0, 0, "the buyer should owe nothing");
+});
+
+// Two part credits must not leave a rounded remainder behind in the levy.
+test("part credits give the levy back exactly, however they are split", async () => {
+  const invoice = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+  const line = invoice.items[0];
+
+  await issueCreditNote(
+    { invoiceId: invoice.id, reason: "part one", items: [{ invoiceItemId: line.id, amount: 333 }] },
+    actor,
+  );
+  await issueCreditNote(
+    { invoiceId: invoice.id, reason: "the rest", items: [{ invoiceItemId: line.id, amount: line.lineTotal - 333 }] },
+    actor,
+  );
+
+  const after = new Map((await trialBalance({})).rows.map((r) => [r.code, r]));
+  assert.equal(after.get("2300")?.balance ?? 0, 0, "a levy remainder was stranded by rounding");
+  assert.equal(after.get("1100")?.balance ?? 0, 0, "the buyer should owe nothing");
 });

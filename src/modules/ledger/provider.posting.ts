@@ -36,6 +36,7 @@ export const ACCOUNTS = {
   payable: "2000",
   vatPayable: "2100",
   tdsPayable: "2200",
+  skillPromoPayable: "2300",
   sales: "4000",
   cogs: "5000",
   operatingExpense: "6000",
@@ -48,6 +49,7 @@ export const ACCOUNTS = {
  *   Dr Accounts receivable   total
  *     Cr Sales                        net of VAT
  *     Cr VAT payable                  VAT
+ *     Cr Skill promotion levy         the 0.5% charged on top
  *
  * Cost of goods is posted at the same moment, because the margin only makes
  * sense if the cost leaves inventory in the same period the sale is recognised.
@@ -57,11 +59,20 @@ export const ACCOUNTS = {
  */
 export const postInvoice = async (
   trx: Knex.Transaction,
-  invoice: { id: number; invoice_no: string; issued_at: string; taxable_amount: number; vat_amount: number; total_amount: number },
+  invoice: {
+    id: number;
+    invoice_no: string;
+    issued_at: string;
+    taxable_amount: number;
+    vat_amount: number;
+    skill_promo_amount?: number;
+    total_amount: number;
+  },
   costOfGoods: number,
   actor: AuditActor,
 ) => {
   const date = String(invoice.issued_at).slice(0, 10);
+  const skillPromo = Number(invoice.skill_promo_amount ?? 0);
 
   await postEntry(trx, {
     date,
@@ -72,6 +83,9 @@ export const postInvoice = async (
       { account: ACCOUNTS.receivable, debit: Number(invoice.total_amount) },
       { account: ACCOUNTS.sales, credit: Number(invoice.taxable_amount) },
       { account: ACCOUNTS.vatPayable, credit: Number(invoice.vat_amount) },
+      // Collected from the buyer on top of the goods, so it is owed onward and
+      // never reaches the sales account. Zero lines are dropped by postEntry.
+      { account: ACCOUNTS.skillPromoPayable, credit: skillPromo },
     ],
   }, actor);
 
@@ -127,7 +141,15 @@ export const postPayment = async (
  */
 export const postCreditNote = async (
   trx: Knex.Transaction,
-  note: { id: number; credit_note_no: string; issued_at: string; taxable_amount: number; vat_amount: number; total_amount: number },
+  note: {
+    id: number;
+    credit_note_no: string;
+    issued_at: string;
+    taxable_amount: number;
+    vat_amount: number;
+    skill_promo_amount?: number;
+    total_amount: number;
+  },
   restockedCost: number,
   actor: AuditActor,
 ) => {
@@ -141,6 +163,8 @@ export const postCreditNote = async (
     lines: [
       { account: ACCOUNTS.sales, debit: Number(note.taxable_amount) },
       { account: ACCOUNTS.vatPayable, debit: Number(note.vat_amount) },
+      // Given back with the goods, so the levy stops being owed onward too.
+      { account: ACCOUNTS.skillPromoPayable, debit: Number(note.skill_promo_amount ?? 0) },
       { account: ACCOUNTS.receivable, credit: Number(note.total_amount) },
     ],
   }, actor);

@@ -178,6 +178,10 @@ test("a part-paid invoice shows up as owed", async () => {
   await recordPayment({ invoiceId: invoice.id, amount: 1000, method: "cash" }, actor);
 
   const aged = await agedReceivables();
-  assert.equal(aged.total, invoice.totalAmount - 1000, "the unpaid remainder must appear in aged receivables");
+  assert.equal(
+    aged.total,
+    Math.round((invoice.totalAmount - 1000) * 100) / 100,
+    "the unpaid remainder must appear in aged receivables",
+  );
   assert.equal(aged.items.length, 1);
 });

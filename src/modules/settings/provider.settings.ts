@@ -18,9 +18,10 @@ export const getCurrentSilverRatePerGram = async (trx?: Knex.Transaction): Promi
 };
 
 export const getSettings = async () => {
-  const [settings, rate] = await Promise.all([
+  const [settings, rate, business] = await Promise.all([
     db("settings").where({ id: 1 }).first(),
     getCurrentSilverRate(),
+    db("business_profile").first("is_vat_registered", "default_vat_rate", "skill_promo_rate"),
   ]);
 
   return {
@@ -31,6 +32,12 @@ export const getSettings = async () => {
     // admin UI keys off this being null to say so.
     silverRateSyncedAt: rate?.source === "auto" ? (rate?.effective_from ?? null) : null,
     esewaQrUrl: settings?.esewa_qr_url ?? null,
+    // The counter needs these to show a sale's total before it is issued. The
+    // invoice is still priced by the server; this is only so the screen agrees
+    // with the document it is about to produce.
+    isVatRegistered: Boolean(business?.is_vat_registered),
+    vatRate: business?.is_vat_registered ? Number(business?.default_vat_rate ?? 0) : 0,
+    skillPromoRate: Number(business?.skill_promo_rate ?? 0),
   };
 };
 
