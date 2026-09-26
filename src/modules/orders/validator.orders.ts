@@ -9,6 +9,12 @@ export const createOrderValidator = [
   body("paymentMethod").isIn(["cod", "esewa_qr"]).withMessage("paymentMethod must be 'cod' or 'esewa_qr'"),
 ];
 
+export const createCounterOrderValidator = [
+  ...createOrderValidator,
+  body("items").isArray({ min: 1 }).withMessage("Pick at least one piece"),
+  body("items.*.jewelryId").isInt({ min: 1 }).withMessage("Each line needs a jewelryId"),
+];
+
 export const updateOrderStatusValidator = [
   body("status").optional().isIn(["pending", "confirmed", "completed", "cancelled"]),
   body("paymentStatus").optional().isIn(["unpaid", "awaiting_verification", "paid"]),

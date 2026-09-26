@@ -893,3 +893,37 @@ revenue.
 the arithmetic use the two-decimal formatter so the column adds up. If whole
 rupees are wanted at the counter, the levy would have to be rounded at issue
 time — a money decision, not a display one.
+
+---
+
+## Orders — the job from pending to sold
+
+Added 2026-09-26. Before this, an order could only be created by a logged-in
+shopper on the storefront, and there was no way to turn one into a sale.
+
+| Step | What the shop sees | What actually happens |
+|---|---|---|
+| 1 | **Pending** | `POST /api/orders/counter` — pieces go to `reserved`, buyer matched on phone, order numbered `ORD-2083/84-000001`. |
+| 2 | **Delivered** | `PATCH /api/orders/:id/status` → `confirmed`. Nothing financial moves. |
+| 3 | **Sold** | `POST /api/orders/:id/invoice` — issues the invoice, pieces go to `sold`, the ledger moves. |
+| — | **Cancelled** | Pieces go back to `available`. |
+
+**A counter order has no login.** `orders.user_id` was already nullable; the
+identity that matters is `customer_id`, which every order carries. `listOrders`
+inner-joined `users`, which would have hidden every counter order — now a left
+join, falling back to the customer's name.
+
+**Stock is held, not sold.** The storefront path used to mark pieces `sold` the
+moment an order was placed, so stock left the books with no invoice behind it.
+Both paths now `reserve`, and only an invoice sells.
+
+**The buyer is charged what they were quoted** — `invoiceOrder` passes each
+line's `unit_price_snapshot`, so a silver-rate move between order and delivery
+does not change the agreed price.
+
+**An order carries its invoice.** `listOrders` left-joins the non-void invoice on
+`invoices.order_id`, so every order shows the sale it became, and the sales list
+shows where each sale came from.
+
+Six tests in `src/modules/orders/provider.orders.test.ts` cover the pipeline,
+double-promising a piece, double-invoicing, and cancelling.
