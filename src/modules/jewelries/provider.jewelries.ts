@@ -89,6 +89,33 @@ const resolveMakingCharge = (
   return fallback;
 };
 
+/**
+ * A code for a piece that was not given one.
+ *
+ * sku is NOT NULL and UNIQUE, so every piece needs one whether or not the shop
+ * uses codes. Three letters of the category and a running number reads better
+ * on a tag than a random string, and stays short enough to write by hand.
+ */
+const nextSku = async (category: string): Promise<string> => {
+  const prefix = (category.replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase() || "JWL");
+  const last = await db("jewelries")
+    .where("sku", "like", `${prefix}-%`)
+    .orderBy("sku", "desc")
+    .first("sku");
+
+  const lastNumber = last ? Number(String(last.sku).slice(prefix.length + 1)) : 0;
+  const next = Number.isFinite(lastNumber) ? lastNumber + 1 : 1;
+  return `${prefix}-${String(next).padStart(4, "0")}`;
+};
+
+/** A duplicate code is the shop's mistake to fix, not a server error. */
+const asFriendlySkuError = (err: any, sku: string) => {
+  if (err?.code === "ER_DUP_ENTRY") {
+    return Object.assign(new Error(`Another piece already uses the code ${sku}`), { status: 409 });
+  }
+  return err;
+};
+
 export const createJewelry = async (
   data: CreateJewelryPayload,
   file?: Express.Multer.File,
@@ -111,18 +138,30 @@ export const createJewelry = async (
     image_public_id = uploaded.publicId;
   }
 
-  const [id] = await db("jewelries").insert({
-    name: data.name,
-    category: data.category,
-    silver_weight_grams: data.silverWeightGrams,
-    making_charge: makingCharge,
-    stone_weight_grams: data.stoneWeightGrams ?? null,
-    stone_price: data.stonePrice ?? null,
-    image_url,
-    image_public_id,
-  });
-
-  return getJewelry(id);
+  const typedSku = data.sku?.trim();
+  // Retried because two pieces added at the same moment can work out the same
+  // next number. Only when the shop did not choose the code itself.
+  for (let attempt = 0; ; attempt++) {
+    const sku = typedSku || (await nextSku(data.category));
+    try {
+      const [id] = await db("jewelries").insert({
+        sku,
+        name: data.name,
+        category: data.category,
+        material: data.material?.trim() || "silver",
+        purity: data.purity?.trim() || null,
+        silver_weight_grams: data.silverWeightGrams,
+        making_charge: makingCharge,
+        stone_weight_grams: data.stoneWeightGrams ?? null,
+        stone_price: data.stonePrice ?? null,
+        image_url,
+        image_public_id,
+      });
+      return getJewelry(id);
+    } catch (err: any) {
+      if (typedSku || err?.code !== "ER_DUP_ENTRY" || attempt >= 4) throw asFriendlySkuError(err, sku);
+    }
+  }
 };
 
 export const updateJewelry = async (
@@ -147,6 +186,11 @@ export const updateJewelry = async (
   const update: Record<string, unknown> = {
     name: data.name ?? existing.name,
     category: data.category ?? existing.category,
+    // A blank code means "leave it alone", never "clear it": the column is NOT
+    // NULL and the old code may already be written on the piece's tag.
+    sku: data.sku?.trim() || existing.sku,
+    material: data.material?.trim() || existing.material,
+    purity: data.purity === undefined ? existing.purity : (data.purity.trim() || null),
     silver_weight_grams: weight,
     making_charge: makingCharge,
     stone_weight_grams: data.stoneWeightGrams ?? existing.stone_weight_grams,
@@ -226,6 +270,63 @@ export const retireJewelry = async (
       entityId: id,
       oldValues: { status: existing.status },
       newValues: { status, reason },
+    });
+  });
+
+  return getJewelry(id);
+};
+
+/**
+ * Puts a deleted piece back on the shelf.
+ *
+ * Deleting a piece is a status change, not a removal, so it can be undone --
+ * and it has to be, because "entered by mistake" is the easiest thing in the
+ * system to click by mistake.
+ *
+ * An inbound stock row mirrors the outbound one written when it was deleted, so
+ * the two cancel out and the stock count is right again. The ledger keeps both
+ * rows: what happened is that it went off the shelf and came back, and that is
+ * what the history should say.
+ *
+ * A sold piece is not restorable. It is on a tax document, and the way back is
+ * a credit note.
+ */
+export const restoreJewelry = async (id: number, reason: string, actor: AuditActor) => {
+  const existing = await db("jewelries").where({ id }).first();
+  if (!existing) return null;
+
+  if (existing.status === "sold") {
+    throw Object.assign(
+      new Error("This piece is sold. Bring it back with a credit note, not a status change."),
+      { status: 409 },
+    );
+  }
+  if (["available", "reserved"].includes(existing.status)) {
+    throw Object.assign(new Error("This piece is already on the shelf"), { status: 409 });
+  }
+
+  await db.transaction(async (trx) => {
+    await trx("jewelries").where({ id }).update({ status: "available" });
+
+    await trx("inventory_transactions").insert({
+      jewelry_id: id,
+      type: "adjustment",
+      direction: "in",
+      quantity: 1,
+      cost_amount: existing.cost_price ?? null,
+      reference_type: "manual",
+      reference_id: null,
+      note: reason,
+      created_by: actor.userId ?? null,
+    });
+
+    await writeAuditLog(trx, {
+      ...actor,
+      action: "update",
+      entityType: "jewelries",
+      entityId: id,
+      oldValues: { status: existing.status },
+      newValues: { status: "available", reason },
     });
   });
 

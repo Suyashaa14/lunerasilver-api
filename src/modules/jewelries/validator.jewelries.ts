@@ -19,6 +19,9 @@ export const createJewelryValidator: ValidationChain[] = [
   ...pricingFieldsValidator,
   body("stoneWeightGrams").optional({ values: "null" }).isFloat({ min: 0 }),
   body("stonePrice").optional({ values: "null" }).isFloat({ min: 0 }),
+  body("sku").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
+  body("material").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
+  body("purity").optional({ values: "falsy" }).isString().trim().isLength({ max: 10 }),
 ];
 
 export const updateJewelryValidator: ValidationChain[] = [
@@ -30,4 +33,7 @@ export const updateJewelryValidator: ValidationChain[] = [
   body("totalCost").optional().isFloat({ min: 0 }),
   body("stoneWeightGrams").optional({ values: "null" }).isFloat({ min: 0 }),
   body("stonePrice").optional({ values: "null" }).isFloat({ min: 0 }),
+  body("sku").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
+  body("material").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
+  body("purity").optional({ values: "falsy" }).isString().trim().isLength({ max: 10 }),
 ];

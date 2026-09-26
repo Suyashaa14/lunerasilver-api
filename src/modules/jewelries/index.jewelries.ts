@@ -30,5 +30,7 @@ router.put(
 // Pieces are never deleted -- they are retired with a reason, which writes a
 // stock-ledger row. See src/utils/noDelete.ts.
 router.post("/:id/retire", authenticateStaff, asyncHandler(controller.retireJewelry));
+// Deleting is a status change, so it can be undone.
+router.post("/:id/restore", authenticateStaff, asyncHandler(controller.restoreJewelry));
 
 export default router;

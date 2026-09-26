@@ -1,4 +1,8 @@
 export interface CreateJewelryPayload {
+  /** The shop's own code. Generated when left blank. */
+  sku?: string;
+  material?: string;
+  purity?: string;
   name: string;
   category: string;
   silverWeightGrams: number;

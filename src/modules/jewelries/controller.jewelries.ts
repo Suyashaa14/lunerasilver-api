@@ -92,3 +92,13 @@ export const getJewelryDetail = async (req: Request, res: Response) => {
   if (!piece) return res.status(404).json({ status: false, message: "Jewelry not found" });
   res.json(piece);
 };
+
+export const restoreJewelry = async (req: Request, res: Response) => {
+  const reason = String(req.body?.reason ?? "").trim();
+  if (reason === "") {
+    return res.status(400).json({ status: false, message: "A reason is required to put a piece back" });
+  }
+  const piece = await provider.restoreJewelry(Number(req.params.id), reason, auditActor(req));
+  if (!piece) return res.status(404).json({ status: false, message: "Piece not found" });
+  res.json(piece);
+};
