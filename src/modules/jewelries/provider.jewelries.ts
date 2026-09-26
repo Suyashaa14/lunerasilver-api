@@ -38,10 +38,22 @@ interface ListFilters {
   pageSize: number;
 }
 
+/** Statuses a shopper may see. Everything else has left the shelf. */
+const PUBLICLY_VISIBLE = ["available", "reserved"];
+
 export const listJewelries = async (filters: ListFilters) => {
   const query = db("jewelries").orderBy("created_at", "desc");
   if (filters.category) query.where({ category: filters.category });
-  if (filters.status) query.where({ status: filters.status });
+
+  if (filters.status) {
+    query.where({ status: filters.status });
+  } else {
+    // This endpoint is public. Without this, a piece that was sold, broke, was
+    // lost, or was entered by mistake stayed on the storefront and could be
+    // added to a cart -- the checkout would then refuse it, having already
+    // shown a customer something that was never for sale.
+    query.whereIn("status", PUBLICLY_VISIBLE);
+  }
 
   const [rows, rate] = await Promise.all([query, getCurrentSilverRate()]);
   const all = rows.map((r) => toDTO(r, rate));
