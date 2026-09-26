@@ -290,7 +290,9 @@ export const listCatalogue = async (filters: CatalogueFilters) => {
   return {
     data: rows.map((r: any) => {
       const dto = toDTO(r, rate);
-      const days = Math.floor((now - new Date(r.created_at).getTime()) / 86400000);
+      // Never negative. The connection runs in UTC and Nepal is 5h45m ahead, so
+      // a piece added this morning can read as "-1 d" without the floor.
+      const days = Math.max(0, Math.floor((now - new Date(r.created_at).getTime()) / 86400000));
       return {
         ...dto,
         sku: r.sku,

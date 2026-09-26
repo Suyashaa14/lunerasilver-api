@@ -19,6 +19,14 @@ let secondPieceId = 0;
 const wipe = async () => {
   const invoiceIds = (await unguardedDb("invoices").where("buyer_name", "like", `${MARK}%`).select("id")).map((r: any) => r.id);
   if (invoiceIds.length > 0) {
+    // Credit notes point at their invoice with a RESTRICT key, so they have to
+    // go first or nothing below this line can be cleaned up.
+    const noteIds = (await unguardedDb("credit_notes").whereIn("invoice_id", invoiceIds).select("id")).map((r: any) => r.id);
+    if (noteIds.length > 0) {
+      await unguardedDb("credit_note_items").whereIn("credit_note_id", noteIds).del();
+      await unguardedDb("credit_notes").whereIn("id", noteIds).del();
+      await unguardedDb("inventory_transactions").where({ reference_type: "credit_note" }).whereIn("reference_id", noteIds).del();
+    }
     await unguardedDb("inventory_transactions").where({ reference_type: "invoice" }).whereIn("reference_id", invoiceIds).del();
     await unguardedDb("invoice_items").whereIn("invoice_id", invoiceIds).del();
     await unguardedDb("audit_logs").where({ entity_type: "invoices" }).whereIn("entity_id", invoiceIds).del();
