@@ -2,6 +2,8 @@ import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import db, { unguardedDb } from "../../utils/db";
 import { issueInvoice, getInvoice } from "./provider.issue";
+import { issueCreditNote } from "./provider.creditNote";
+import { getCustomerPurchases } from "../customers/provider.customers";
 
 const MARK = "__inv_test__";
 import { actor, resolveActor } from "../../utils/testActor";
@@ -235,4 +237,51 @@ test("printing counts, and the first one is the original", async () => {
 
   assert.equal((await recordPrint(invoice.id, actor))!.printCount, 1);
   assert.equal((await recordPrint(invoice.id, actor))!.printCount, 2);
+});
+
+// --- What a customer bought --------------------------------------------------
+
+// The buyer entered on a sale becomes a customer, and every piece they take
+// home hangs off that one record so the history can be read back later.
+test("a sale records what the buyer bought against their customer record", async () => {
+  const invoice = await issueInvoice(
+    { customer: buyer, paymentMethod: "cash", items: [{ jewelryId }, { jewelryId: secondPieceId }] },
+    actor,
+  );
+
+  const history = await getCustomerPurchases(invoice.customerId);
+  assert.equal(history.items.length, 2);
+  assert.equal(history.summary.piecesBought, 2);
+  assert.equal(history.summary.totalSpent, invoice.taxableAmount, "the levy is not something they bought");
+  assert.equal(history.summary.silverGrams, 15, "10 g ring plus 5 g pendant");
+
+  const ring = history.items.find((i) => i.jewelryId === jewelryId)!;
+  assert.equal(ring.name, "Test Ring", "the line's snapshot, not today's catalogue");
+  assert.equal(ring.invoice.invoiceNo, invoice.invoiceNo, "each piece points back at its sale");
+  assert.equal(ring.isReturned, false);
+});
+
+// A second sale to the same phone must land on the same record, not a new one.
+test("a repeat buyer's purchases build up on one record", async () => {
+  const first = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+  const second = await issueInvoice(
+    { customer: { ...buyer, name: `${MARK} Typed Differently` }, paymentMethod: "cash", items: [{ jewelryId: secondPieceId }] },
+    actor,
+  );
+
+  assert.equal(second.customerId, first.customerId, "the same phone must be the same customer");
+  const history = await getCustomerPurchases(first.customerId);
+  assert.equal(history.items.length, 2);
+});
+
+// A return stays in the history -- marked, not hidden -- and stops counting.
+test("a returned piece is kept in the history but no longer counted", async () => {
+  const invoice = await issueInvoice({ customer: buyer, paymentMethod: "cash", items: [{ jewelryId }] }, actor);
+  await issueCreditNote({ invoiceId: invoice.id, reason: "returned" }, actor);
+
+  const history = await getCustomerPurchases(invoice.customerId);
+  assert.equal(history.items.length, 1, "the return is part of their history");
+  assert.equal(history.items[0].isVoid, true, "a full credit voids the invoice");
+  assert.equal(history.summary.piecesBought, 0);
+  assert.equal(history.summary.totalSpent, 0);
 });

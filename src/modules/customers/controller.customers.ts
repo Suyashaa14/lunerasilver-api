@@ -56,3 +56,7 @@ export const findOrCreateCustomer = async (req: Request, res: Response) => {
   const customer = await db.transaction((trx) => provider.findOrCreateByPhone(trx, parse(req.body), actor));
   res.json(customer);
 };
+
+export const getCustomerPurchases = async (req: Request, res: Response) => {
+  res.json(await provider.getCustomerPurchases(Number(req.params.id)));
+};

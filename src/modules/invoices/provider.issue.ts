@@ -326,6 +326,8 @@ export const listInvoices = async (filters: InvoiceListFilters) => {
       issuedAt: r.issued_at,
       issuedDateBs: r.issued_date_bs,
       buyerName: r.buyer_name,
+      // The snapshot is what the document says; the id is who to open.
+      customerId: Number(r.customer_id),
       totalAmount: Number(r.total_amount),
       paid: Number(r.paid),
       outstanding: r.is_void ? 0 : Math.round((Number(r.total_amount) - Number(r.paid)) * 100) / 100,

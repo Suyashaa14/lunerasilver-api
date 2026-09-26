@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import db, { unguardedDb } from "../../utils/db";
-import { findOrCreateByPhone, normalizePhone, createCustomer, updateCustomer } from "./provider.customers";
+import { findOrCreateByPhone, normalizePhone, createCustomer, updateCustomer, getCustomerPurchases } from "./provider.customers";
 
 const MARK = "__cust_test__";
 // Unique per run, so a number used elsewhere in the database cannot collide.
@@ -115,4 +115,42 @@ test("a repeat buyer's blank details are filled in, and filled ones are left alo
     findOrCreateByPhone(trx, { name: `${MARK} Bimala`, phone, addressLine: "Jhamsikhel, Ward 3" }, actor),
   );
   assert.equal(third.addressLine, "Corrected address", "a stored address was overwritten by the counter");
+});
+
+// One phone, one customer -- enforced by the database, not just by the lookup.
+// Two sales saved at the same instant used to be able to split a buyer's
+// history across two records.
+test("the same phone cannot end up on two customers", async () => {
+  const phone = `98${String(Date.now()).slice(-8)}`;
+  const first = await createCustomer({ name: `${MARK} Unique`, phone }, actor);
+  assert.ok(first);
+
+  await assert.rejects(
+    unguardedDb("customers").insert({ name: `${MARK} Copy`, phone }),
+    /Duplicate entry|ER_DUP_ENTRY/,
+  );
+
+  // Two at once resolve to the one buyer rather than failing a sale.
+  const [a, b] = await Promise.all([
+    db.transaction((trx) => findOrCreateByPhone(trx, { name: `${MARK} Race A`, phone }, actor)),
+    db.transaction((trx) => findOrCreateByPhone(trx, { name: `${MARK} Race B`, phone }, actor)),
+  ]);
+  assert.equal(a.id, b.id);
+  assert.equal(a.id, first!.id);
+});
+
+// A walk-in who gives no number still gets their own row: there is nothing to
+// recognise them by, so they cannot be merged with anyone.
+test("customers without a phone are not collapsed into one", async () => {
+  const one = await createCustomer({ name: `${MARK} Walkin A` }, actor);
+  const two = await createCustomer({ name: `${MARK} Walkin B` }, actor);
+  assert.notEqual(one!.id, two!.id);
+});
+
+test("a customer with no purchases reports an empty history", async () => {
+  const customer = await createCustomer({ name: `${MARK} Fresh`, phone: `97${String(Date.now()).slice(-8)}` }, actor);
+  const history = await getCustomerPurchases(customer!.id);
+  assert.deepEqual(history.items, []);
+  assert.equal(history.summary.piecesBought, 0);
+  assert.equal(history.summary.totalSpent, 0);
 });

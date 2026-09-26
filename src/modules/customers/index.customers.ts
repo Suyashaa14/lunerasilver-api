@@ -13,6 +13,8 @@ router.get("/", asyncHandler(controller.listCustomers));
 router.post("/", createCustomerValidator, asyncHandler(controller.createCustomer));
 router.post("/find-or-create", createCustomerValidator, asyncHandler(controller.findOrCreateCustomer));
 router.get("/:id", asyncHandler(controller.getCustomer));
+// Piece by piece, what this buyer has taken home.
+router.get("/:id/purchases", asyncHandler(controller.getCustomerPurchases));
 router.put("/:id", updateCustomerValidator, asyncHandler(controller.updateCustomer));
 
 // No delete route. A customer named on an invoice has to stay for the document

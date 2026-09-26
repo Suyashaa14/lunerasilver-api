@@ -166,7 +166,19 @@ export const findOrCreateByPhone = async (
     }
   }
 
-  const [id] = await conn("customers").insert({ ...toRow(data), phone, user_id: data.userId ?? null });
+  let id: number;
+  try {
+    [id] = await conn("customers").insert({ ...toRow(data), phone, user_id: data.userId ?? null });
+  } catch (err: any) {
+    // Two sales for the same new buyer saved at the same instant: the second
+    // insert waits on the unique index, then fails. The buyer exists now, so
+    // use them rather than failing the sale. A locking read is needed here --
+    // a plain one would still be reading this transaction's older snapshot.
+    if (err?.code !== "ER_DUP_ENTRY" || !phone) throw err;
+    const raced = await conn("customers").where({ phone }).forUpdate().first();
+    if (!raced) throw err;
+    return toDTO(raced);
+  }
 
   if ((conn as Knex.Transaction).isTransaction) {
     await writeAuditLog(conn as Knex.Transaction, {
@@ -201,4 +213,81 @@ export const findOrCreateForUser = async (
     city: fallback.city ?? null,
   });
   return id as number;
+};
+
+/**
+ * Everything this customer has ever bought, piece by piece.
+ *
+ * Read from invoice lines rather than from the catalogue, so it still reads
+ * correctly years later: the snapshot on the line is what was sold and what was
+ * charged, whatever has happened to the piece or the silver rate since.
+ *
+ * Void invoices and credited lines are kept but marked. A return is part of a
+ * customer's history, not something to hide from it.
+ */
+export const getCustomerPurchases = async (customerId: number) => {
+  const rows = await db("invoice_items as it")
+    .join("invoices as i", "i.id", "it.invoice_id")
+    .where("i.customer_id", customerId)
+    .where("i.series", "SALES")
+    .orderBy("i.issued_at", "desc")
+    .orderBy("it.id", "desc")
+    .select(
+      "it.id",
+      "it.jewelry_id",
+      "it.name_snapshot",
+      "it.sku_snapshot",
+      "it.category_snapshot",
+      "it.silver_weight_snapshot",
+      "it.unit_price",
+      "it.discount",
+      "it.line_total",
+      "i.id as invoice_id",
+      "i.invoice_no",
+      "i.issued_at",
+      "i.issued_date_bs",
+      "i.is_void",
+      db.raw(
+        `COALESCE((SELECT SUM(cni.amount) FROM credit_note_items cni
+                   WHERE cni.invoice_item_id = it.id), 0) AS credited`,
+      ),
+    );
+
+  const items = rows.map((r: any) => {
+    const lineTotal = Number(r.line_total);
+    const credited = Number(r.credited);
+    const isVoid = Boolean(r.is_void);
+    return {
+      id: Number(r.id),
+      jewelryId: r.jewelry_id === null ? null : Number(r.jewelry_id),
+      name: r.name_snapshot,
+      sku: r.sku_snapshot,
+      category: r.category_snapshot,
+      silverWeightGrams: r.silver_weight_snapshot === null ? null : Number(r.silver_weight_snapshot),
+      unitPrice: Number(r.unit_price),
+      discount: Number(r.discount),
+      lineTotal,
+      credited,
+      // What the customer actually kept and paid for.
+      netAmount: isVoid ? 0 : Math.round((lineTotal - credited) * 100) / 100,
+      isVoid,
+      isReturned: !isVoid && credited >= lineTotal,
+      invoice: { id: Number(r.invoice_id), invoiceNo: r.invoice_no },
+      issuedAt: r.issued_at,
+      issuedDateBs: r.issued_date_bs,
+    };
+  });
+
+  const kept = items.filter((i) => !i.isVoid && !i.isReturned);
+
+  return {
+    items,
+    summary: {
+      piecesBought: kept.length,
+      totalSpent: Math.round(items.reduce((sum, i) => sum + i.netAmount, 0) * 100) / 100,
+      silverGrams: Math.round(kept.reduce((sum, i) => sum + (i.silverWeightGrams ?? 0), 0) * 1000) / 1000,
+      firstBoughtAt: items.length > 0 ? items[items.length - 1].issuedAt : null,
+      lastBoughtAt: items.length > 0 ? items[0].issuedAt : null,
+    },
+  };
 };
