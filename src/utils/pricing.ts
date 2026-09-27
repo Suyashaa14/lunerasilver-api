@@ -1,21 +1,46 @@
-// Price today = silver weight x today's rate + making charge + stone price.
-//
-// Changed 2026-09-26 to match the agreed jewellery screens. Two differences
-// from the previous behaviour, both deliberate:
-//   * stone price is now included. It was excluded before, so a stone-set piece
-//     was sold for less than the stone had cost.
-//   * no rounding up to the nearest Rs 50. The screens state the formula on the
-//     page, and a rounded figure would not match the arithmetic shown.
-//
-// Nothing is stored: the price moves with the daily rate. Issued invoices keep
-// their own snapshot and are unaffected.
+/**
+ * What a piece sells for today.
+ *
+ *   silver weight x TODAY'S rate      moves every day with the market
+ * + making charge paid to the supplier   fixed the day it was bought
+ * + stone price paid to the supplier     fixed the day it was bought
+ * + the shop's profit                    typed in rupees, per piece
+ * = price today
+ *
+ * Only the silver moves. The making charge and the stone are passed on at what
+ * they cost, and the profit is the shop's own margin on top -- which is why it
+ * is a column of its own rather than folded into the making charge. Folding it
+ * in is what made the making charge mean "what we paid" on the buying screen
+ * and "what we earn" on the selling screen at the same time.
+ *
+ * Nothing is stored: the price is worked out on every screen that shows it.
+ * Issued invoices keep their own snapshot and never change.
+ */
 export function computePrice(
   weightGrams: number,
   makingCharge: number,
   ratePerGram: number,
   stonePrice: number = 0,
+  profitAmount: number = 0,
 ): number {
-  return round2(weightGrams * ratePerGram + makingCharge + stonePrice);
+  return round2(weightGrams * ratePerGram + makingCharge + stonePrice + profitAmount);
+}
+
+/**
+ * What a piece cost, settled the day it was bought and fixed from then on.
+ *
+ * The rate is the one actually paid to the supplier, not today's. A piece
+ * bought when silver was cheap keeps that cost for ever -- that gap between the
+ * rate paid and today's rate is the shop holding stock, and it only reads
+ * correctly if the cost stops moving.
+ */
+export function computeCost(
+  weightGrams: number,
+  makingCharge: number,
+  ratePaidPerGram: number,
+  stonePrice: number = 0,
+): number {
+  return round2(weightGrams * ratePaidPerGram + makingCharge + stonePrice);
 }
 
 export function backSolveMakingCharge(

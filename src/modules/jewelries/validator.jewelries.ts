@@ -22,6 +22,7 @@ export const createJewelryValidator: ValidationChain[] = [
   body("sku").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
   body("material").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
   body("purity").optional({ values: "falsy" }).isString().trim().isLength({ max: 10 }),
+  body("profitAmount").optional({ values: "null" }).isFloat({ min: 0 }),
 ];
 
 export const updateJewelryValidator: ValidationChain[] = [
@@ -36,4 +37,5 @@ export const updateJewelryValidator: ValidationChain[] = [
   body("sku").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
   body("material").optional({ values: "falsy" }).isString().trim().isLength({ max: 40 }),
   body("purity").optional({ values: "falsy" }).isString().trim().isLength({ max: 10 }),
+  body("profitAmount").optional({ values: "null" }).isFloat({ min: 0 }),
 ];

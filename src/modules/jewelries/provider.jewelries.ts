@@ -14,6 +14,10 @@ const toDTO = (row: any, rate: number): JewelryDTO => {
   const stonePrice = row.stone_price === null || row.stone_price === undefined ? null : Number(row.stone_price);
   const silverWeight = Number(row.silver_weight_grams);
   const makingCharge = Number(row.making_charge);
+  const profitAmount = Number(row.profit_amount ?? 0);
+  const costRatePerGram = row.cost_rate_per_gram === null || row.cost_rate_per_gram === undefined
+    ? null
+    : Number(row.cost_rate_per_gram);
 
   return {
     id: row.id,
@@ -21,12 +25,16 @@ const toDTO = (row: any, rate: number): JewelryDTO => {
     sku: row.sku ?? null,
     material: row.material ?? null,
     purity: row.purity ?? null,
+    // What the shop adds, and the silver rate the cost was settled at. Both are
+    // needed to show why a price is what it is.
+    profitAmount,
+    costRatePerGram,
     category: row.category,
     imageUrl: row.image_url,
     silverWeightGrams: silverWeight,
     makingCharge,
     status: row.status,
-    price: computePrice(silverWeight, makingCharge, rate, stonePrice ?? 0),
+    price: computePrice(silverWeight, makingCharge, rate, stonePrice ?? 0, profitAmount),
     stoneWeightGrams,
     stonePrice,
     estimatedCost: silverWeight * rate + (stonePrice ?? 0) + makingCharge,
@@ -153,6 +161,7 @@ export const createJewelry = async (
         category: data.category,
         material: data.material?.trim() || "silver",
         purity: data.purity?.trim() || null,
+        profit_amount: data.profitAmount ?? 0,
         silver_weight_grams: data.silverWeightGrams,
         making_charge: makingCharge,
         stone_weight_grams: data.stoneWeightGrams ?? null,
@@ -194,6 +203,7 @@ export const updateJewelry = async (
     sku: data.sku?.trim() || existing.sku,
     material: data.material?.trim() || existing.material,
     purity: data.purity === undefined ? existing.purity : (data.purity.trim() || null),
+    profit_amount: data.profitAmount ?? existing.profit_amount,
     silver_weight_grams: weight,
     making_charge: makingCharge,
     stone_weight_grams: data.stoneWeightGrams ?? existing.stone_weight_grams,
@@ -459,10 +469,26 @@ export const getJewelryDetail = async (id: number) => {
     material: row.material,
     purity: row.purity,
     costPrice: cost,
+    // The cost, itemised. A piece that cannot explain its own cost can only be
+    // trusted, and trust is not evidence. `unexplained` is whatever the bill
+    // added on top of the parts -- non-reclaimable VAT, usually.
+    costBreakdown: cost === null ? null : (() => {
+      const costRate = row.cost_rate_per_gram === null ? null : Number(row.cost_rate_per_gram);
+      const silver = costRate === null ? null : Math.round(Number(row.silver_weight_grams) * costRate * 100) / 100;
+      const making = Number(row.making_charge);
+      const stone = Number(row.stone_price ?? 0);
+      return {
+        silverRatePaid: costRate,
+        silver,
+        making,
+        stone,
+        unexplained: silver === null ? null : Math.round((cost - silver - making - stone) * 100) / 100,
+      };
+    })(),
     priceToday: onShelf ? price : null,
     margin: cost === null || !onShelf ? null : Math.round((price - cost) * 100) / 100,
     marginPercent: cost === null || !onShelf || price === 0 ? null : Math.round(((price - cost) / price) * 1000) / 10,
-    daysInStock: onShelf ? Math.floor((Date.now() - new Date(row.created_at).getTime()) / 86400000) : null,
+    daysInStock: onShelf ? Math.max(0, Math.floor((Date.now() - new Date(row.created_at).getTime()) / 86400000)) : null,
     staleDays: STALE_DAYS,
     silverRate: { perGram: rate, effectiveFrom: (rateRow as any)?.effective_from ?? null },
     source: source

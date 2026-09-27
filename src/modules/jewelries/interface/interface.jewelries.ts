@@ -1,4 +1,6 @@
 export interface CreateJewelryPayload {
+  /** The shop's margin on this piece, in rupees. */
+  profitAmount?: number;
   /** The shop's own code. Generated when left blank. */
   sku?: string;
   material?: string;
@@ -21,6 +23,10 @@ export interface JewelryDTO {
   sku: string | null;
   material: string | null;
   purity: string | null;
+  /** The shop's own margin, in rupees, typed per piece. */
+  profitAmount: number;
+  /** The silver rate actually paid, so the cost can explain itself later. */
+  costRatePerGram: number | null;
   category: string;
   imageUrl: string | null;
   silverWeightGrams: number;

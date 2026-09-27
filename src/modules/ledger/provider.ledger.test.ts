@@ -257,3 +257,70 @@ test("part credits give the levy back exactly, however they are split", async ()
   assert.equal(after.get("2300")?.balance ?? 0, 0, "a levy remainder was stranded by rounding");
   assert.equal(after.get("1100")?.balance ?? 0, 0, "the buyer should owe nothing");
 });
+
+// --- Cost is fixed at purchase; only the silver moves -----------------------
+
+// The shop's flow: a supplier is paid for silver, making and stone; the shop
+// adds its own profit; the customer pays the total. The cost must not move
+// afterwards, and the profit must not hide inside the making charge.
+test("a piece keeps the cost it was bought at, and prices from today's rate", async () => {
+  const { createPurchase: buy } = await import("../purchases/provider.purchases");
+  const { getJewelry } = await import("../jewelries/provider.jewelries");
+  const { updateSilverRate } = await import("../settings/provider.settings");
+
+  await updateSilverRate(100);
+
+  await buy({
+    supplierId, billNo: `${MARK}-FLOW`, billDate: "2026-09-20",
+    items: [{
+      description: "Ring from the bill",
+      stockIn: {
+        name: "Flow Ring", category: "rings", sku: `${MARK}-flow`,
+        silverWeightGrams: 10,
+        ratePerGram: 100,   // the rate paid that day
+        makingCharge: 500,  // paid to the supplier
+        stonePrice: 300,    // paid to the supplier
+        profitAmount: 400,  // the shop's own margin
+      },
+    }],
+  }, actor);
+
+  const piece = await unguardedDb("jewelries").where({ sku: `${MARK}-flow` }).first();
+  assert.equal(Number(piece.cost_price), 1800, "10g x 100 + 500 making + 300 stone");
+  assert.equal(Number(piece.cost_rate_per_gram), 100, "the rate paid is kept");
+  assert.equal(Number(piece.profit_amount), 400);
+
+  const atCostRate = await getJewelry(piece.id);
+  assert.equal(atCostRate!.price, 2200, "cost 1800 plus 400 profit while the rate is unchanged");
+
+  // Silver doubles overnight.
+  await updateSilverRate(200);
+
+  const afterRise = await getJewelry(piece.id);
+  assert.equal(afterRise!.price, 3200, "10g x 200 + 500 + 300 + 400 -- only the silver moved");
+
+  const unchanged = await unguardedDb("jewelries").where({ id: piece.id }).first("cost_price");
+  assert.equal(Number(unchanged.cost_price), 1800, "the cost must not follow the market");
+
+  await updateSilverRate(100);
+});
+
+// The bill and the piece must never tell two different stories.
+test("a typed line cost that disagrees with its own parts is refused", async () => {
+  const { createPurchase: buy } = await import("../purchases/provider.purchases");
+
+  await assert.rejects(
+    buy({
+      supplierId, billNo: `${MARK}-MISMATCH`, billDate: "2026-09-20",
+      items: [{
+        description: "Wrong total",
+        unitCost: 9999,
+        stockIn: {
+          name: "Bad Ring", category: "rings", sku: `${MARK}-bad`,
+          silverWeightGrams: 10, ratePerGram: 100, makingCharge: 500, stonePrice: 300,
+        },
+      }],
+    }, actor),
+    /does not match/,
+  );
+});

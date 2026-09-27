@@ -2,15 +2,57 @@ import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { stampForDate } from "../../utils/fiscalYear";
 import { postPurchase } from "../ledger/provider.posting";
+import { computeCost } from "../../utils/pricing";
 
 const money = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * What one line of the bill costs.
+ *
+ * A line that books a piece and states the silver rate paid has its cost worked
+ * out from the parts -- silver, making charge, stone -- so the bill and the
+ * piece can never tell two different stories about the same purchase. A typed
+ * total that disagrees with its own parts is refused rather than quietly
+ * preferred, because either figure could be the wrong one.
+ */
+const costOfLine = (line: PurchaseLine): number => {
+  const rate = line.stockIn?.ratePerGram ?? (line.stockIn ? line.ratePerGram : undefined);
+  if (line.stockIn && rate !== undefined && rate !== null) {
+    const parts = computeCost(
+      line.stockIn.silverWeightGrams,
+      line.stockIn.makingCharge,
+      rate,
+      line.stockIn.stonePrice ?? 0,
+    );
+    if (line.unitCost !== undefined && Math.abs(money(line.unitCost) - parts) > 0.01) {
+      throw Object.assign(
+        new Error(
+          `${line.description}: the cost typed (${money(line.unitCost)}) does not match ` +
+            `silver + making + stone (${parts}).`,
+        ),
+        { status: 400 },
+      );
+    }
+    return parts;
+  }
+
+  if (line.unitCost === undefined) {
+    throw Object.assign(
+      new Error(`${line.description}: a line needs a cost, or the silver rate paid so one can be worked out`),
+      { status: 400 },
+    );
+  }
+  return money(line.unitCost);
+};
 
 export interface PurchaseLine {
   description: string;
   material?: string;
   weightGrams?: number;
   ratePerGram?: number;
-  unitCost: number;
+  /** Optional when the line books a piece and gives the rate paid: the cost is
+      then worked out from the parts, so the bill and the piece cannot disagree. */
+  unitCost?: number;
   vatAmount?: number;
   /** Book this line into stock as a sellable piece. */
   stockIn?: {
@@ -20,9 +62,13 @@ export interface PurchaseLine {
     material?: string;
     purity?: string;
     silverWeightGrams: number;
+    /** The silver rate paid to this supplier, on this bill. Not today's. */
+    ratePerGram?: number;
     makingCharge: number;
     stoneWeightGrams?: number | null;
     stonePrice?: number | null;
+    /** What the shop adds on top when it sells. */
+    profitAmount?: number;
   };
 }
 
@@ -113,7 +159,7 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
     const business = await trx("business_profile").first("is_vat_registered");
     const vatReclaimable = Boolean(business?.is_vat_registered);
 
-    const subtotal = money(payload.items.reduce((s, i) => s + i.unitCost, 0));
+    const subtotal = money(payload.items.reduce((s, i) => s + costOfLine(i), 0));
     const discount = money(payload.discount ?? 0);
     const taxable = money(subtotal - discount);
     const vatAmount = money(payload.items.reduce((s, i) => s + (i.vatAmount ?? 0), 0));
@@ -138,10 +184,11 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
     });
 
     for (const line of payload.items) {
+      const unitCost = costOfLine(line);
       const lineVat = line.vatAmount ?? 0;
-      const lineTotal = money(line.unitCost + lineVat);
+      const lineTotal = money(unitCost + lineVat);
       // The landed cost every margin is measured against.
-      const landedCost = money(vatReclaimable ? line.unitCost : line.unitCost + lineVat);
+      const landedCost = money(vatReclaimable ? unitCost : unitCost + lineVat);
 
       let jewelryId: number | null = null;
       if (line.stockIn) {
@@ -157,6 +204,10 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
           stone_weight_grams: line.stockIn.stoneWeightGrams ?? null,
           stone_price: line.stockIn.stonePrice ?? null,
           cost_price: landedCost,
+          // The rate actually paid. Keeping it is what lets the piece explain
+          // its own cost later, instead of asking anyone to trust the total.
+          cost_rate_per_gram: line.stockIn.ratePerGram ?? line.ratePerGram ?? null,
+          profit_amount: line.stockIn.profitAmount ?? 0,
           status: "available",
         });
         jewelryId = pieceId as number;
@@ -167,11 +218,11 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
         jewelry_id: jewelryId,
         description: line.description,
         material: line.material ?? null,
-        weight_grams: line.weightGrams ?? null,
-        rate_per_gram: line.ratePerGram ?? null,
+        weight_grams: line.weightGrams ?? line.stockIn?.silverWeightGrams ?? null,
+        rate_per_gram: line.ratePerGram ?? line.stockIn?.ratePerGram ?? null,
         quantity: 1,
-        unit_cost: money(line.unitCost),
-        taxable_amount: money(line.unitCost),
+        unit_cost: money(unitCost),
+        taxable_amount: money(unitCost),
         vat_amount: money(line.vatAmount ?? 0),
         line_total: lineTotal,
       });

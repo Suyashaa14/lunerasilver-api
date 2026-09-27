@@ -62,7 +62,7 @@ export const createOrder = async (userId: number, data: CreateOrderPayload) => {
     const rate = await getCurrentSilverRatePerGram(trx);
 
     const totalAmount = cartRows.reduce(
-      (sum, r) => sum + computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate, Number(r.stone_price ?? 0)),
+      (sum, r) => sum + computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate, Number(r.stone_price ?? 0), Number(r.profit_amount ?? 0)),
       0,
     );
 
@@ -106,7 +106,7 @@ export const createOrder = async (userId: number, data: CreateOrderPayload) => {
         silver_weight_snapshot: r.silver_weight_grams,
         making_charge_snapshot: r.making_charge,
         silver_rate_snapshot: rate,
-        unit_price_snapshot: computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate, Number(r.stone_price ?? 0)),
+        unit_price_snapshot: computePrice(Number(r.silver_weight_grams), Number(r.making_charge), rate, Number(r.stone_price ?? 0), Number(r.profit_amount ?? 0)),
       })),
     );
 
@@ -160,7 +160,7 @@ export const createCounterOrder = async (data: CreateCounterOrderPayload, actor:
 
     const rate = await getCurrentSilverRatePerGram(trx);
     const priceOf = (p: any) =>
-      computePrice(Number(p.silver_weight_grams), Number(p.making_charge), rate, Number(p.stone_price ?? 0));
+      computePrice(Number(p.silver_weight_grams), Number(p.making_charge), rate, Number(p.stone_price ?? 0), Number(p.profit_amount ?? 0));
 
     const ordered = jewelryIds.map((id) => byId.get(id));
     const totalAmount = ordered.reduce((sum, p) => sum + priceOf(p), 0);

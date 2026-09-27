@@ -16,7 +16,13 @@ const createValidator = [
   body("tdsAmount").optional({ values: "falsy" }).isFloat({ min: 0 }),
   body("items").isArray({ min: 1 }).withMessage("At least one line is required"),
   body("items.*.description").isString().trim().notEmpty(),
-  body("items.*.unitCost").isFloat({ min: 0 }).withMessage("Each line needs a cost"),
+  // Optional: a line that books a piece and states the rate paid has its cost
+  // worked out from the parts. The provider refuses a line with neither.
+  body("items.*.unitCost").optional({ values: "null" }).isFloat({ min: 0 }),
+  body("items.*.stockIn.ratePerGram").optional({ values: "falsy" }).isFloat({ min: 0 }),
+  body("items.*.stockIn.stoneWeightGrams").optional({ values: "null" }).isFloat({ min: 0 }),
+  body("items.*.stockIn.stonePrice").optional({ values: "null" }).isFloat({ min: 0 }),
+  body("items.*.stockIn.profitAmount").optional({ values: "null" }).isFloat({ min: 0 }),
   body("items.*.stockIn.name").optional({ values: "falsy" }).isString().trim().notEmpty(),
   body("items.*.stockIn.category").optional({ values: "falsy" }).isString().trim().notEmpty(),
   body("items.*.stockIn.silverWeightGrams").optional({ values: "falsy" }).isFloat({ min: 0 }),
