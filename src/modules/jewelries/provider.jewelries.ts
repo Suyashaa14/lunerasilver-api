@@ -317,6 +317,20 @@ export const restoreJewelry = async (id: number, reason: string, actor: AuditAct
   if (["available", "reserved"].includes(existing.status)) {
     throw Object.assign(new Error("This piece is already on the shelf"), { status: 409 });
   }
+  // Its bill was voided, so its cost was reversed out of the books with it.
+  // Back on the shelf it would be stock nobody paid for.
+  if (existing.purchase_item_id) {
+    const bill = await db("purchase_items as pi")
+      .join("purchases as p", "p.id", "pi.purchase_id")
+      .where("pi.id", existing.purchase_item_id)
+      .first("p.is_void", "p.bill_no");
+    if (bill?.is_void) {
+      throw Object.assign(
+        new Error(`This piece came in on bill ${bill.bill_no}, which was voided. Enter the corrected bill instead.`),
+        { status: 409 },
+      );
+    }
+  }
 
   await db.transaction(async (trx) => {
     await trx("jewelries").where({ id }).update({ status: "available" });

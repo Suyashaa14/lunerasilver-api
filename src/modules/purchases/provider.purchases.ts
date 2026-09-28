@@ -1,7 +1,7 @@
 import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { stampForDate } from "../../utils/fiscalYear";
-import { postPurchase } from "../ledger/provider.posting";
+import { postPurchase, postReversal } from "../ledger/provider.posting";
 import { computeCost } from "../../utils/pricing";
 
 const money = (n: number) => Math.round(n * 100) / 100;
@@ -105,7 +105,11 @@ export const getPurchase = async (id: number) => {
     tdsAmount: Number(purchase.tds_amount),
     totalAmount: Number(purchase.total_amount),
     paymentStatus: purchase.payment_status,
+    paymentMethod: purchase.payment_method,
     notes: purchase.notes,
+    isVoid: Boolean(purchase.is_void),
+    voidReason: purchase.void_reason,
+    voidedAt: purchase.voided_at,
     items: items.map((i: any) => ({
       id: i.id,
       jewelryId: i.jewelry_id === null ? null : Number(i.jewelry_id),
@@ -142,8 +146,9 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
 
     // Unique per (supplier, bill_no) in the schema. Caught here so the message
     // explains itself rather than surfacing a constraint error.
+    // A voided bill no longer stands, so its number is free for the corrected one.
     const duplicate = await trx("purchases")
-      .where({ supplier_id: payload.supplierId, bill_no: payload.billNo })
+      .where({ supplier_id: payload.supplierId, bill_no: payload.billNo, is_void: false })
       .first("id");
     if (duplicate) {
       throw Object.assign(
@@ -285,5 +290,129 @@ export const listPurchases = async (filters: { supplierId?: number; from?: strin
     billDateBs: r.bill_date_bs,
     totalAmount: Number(r.total_amount),
     paymentStatus: r.payment_status,
+    isVoid: Boolean(r.is_void),
   }));
+};
+
+export interface UpdatePurchaseDetailsPayload {
+  notes?: string | null;
+  paymentStatus?: "unpaid" | "partial" | "paid";
+  paymentMethod?: string | null;
+}
+
+/**
+ * Changes the parts of a bill that carry no money: the note, and whether and
+ * how the supplier has been paid. Anything that moves a figure -- a weight, a
+ * rate, the bill number -- is corrected by voiding and entering it again, so
+ * the stock, the piece costs and the books can never drift apart.
+ */
+export const updatePurchaseDetails = async (id: number, payload: UpdatePurchaseDetailsPayload, actor: AuditActor) => {
+  const existing = await db("purchases").where({ id }).first();
+  if (!existing) return null;
+  if (existing.is_void) {
+    throw Object.assign(new Error("This bill is voided and can no longer be changed"), { status: 409 });
+  }
+
+  const update: Record<string, unknown> = {};
+  if (payload.notes !== undefined) update.notes = payload.notes?.trim() || null;
+  if (payload.paymentStatus !== undefined) update.payment_status = payload.paymentStatus;
+  if (payload.paymentMethod !== undefined) update.payment_method = payload.paymentMethod || null;
+  if (Object.keys(update).length === 0) return getPurchase(id);
+
+  await db.transaction(async (trx) => {
+    await trx("purchases").where({ id }).update(update);
+    await writeAuditLog(trx, {
+      ...actor,
+      action: "update",
+      entityType: "purchases",
+      entityId: id,
+      oldValues: Object.fromEntries(Object.keys(update).map((k) => [k, existing[k]])),
+      newValues: update,
+    });
+  });
+
+  return getPurchase(id);
+};
+
+/**
+ * Cancels a bill that was entered wrong, without removing it.
+ *
+ * In one transaction: the bill is marked void with its reason, every ledger
+ * entry it posted is reversed, and each piece it put on the shelf is taken off
+ * as a mis-entry with a matching outbound stock row.
+ *
+ * Refused if any of its pieces has moved on -- sold, reserved, damaged or lost
+ * -- because that later event rests on this bill and has to be undone first.
+ */
+export const voidPurchase = async (id: number, reason: string, actor: AuditActor) => {
+  const existing = await db("purchases").where({ id }).first();
+  if (!existing) return null;
+  if (existing.is_void) {
+    throw Object.assign(new Error("This bill is already voided"), { status: 409 });
+  }
+
+  const pieces = await db("purchase_items as pi")
+    .join("jewelries as j", "j.id", "pi.jewelry_id")
+    .where("pi.purchase_id", id)
+    .select("j.id", "j.name", "j.status", "j.cost_price");
+
+  const blocked = (pieces as any[]).filter((p) => p.status !== "available" && p.status !== "voided");
+  if (blocked.length > 0) {
+    const list = blocked.map((p) => `${p.name} (${p.status})`).join(", ");
+    throw Object.assign(
+      new Error(
+        `This bill can't be voided: ${list}. Undo that first -- a sold piece needs a credit note, ` +
+          `a reserved one needs its order cancelled.`,
+      ),
+      { status: 409 },
+    );
+  }
+
+  await db.transaction(async (trx) => {
+    await trx("purchases").where({ id }).update({
+      is_void: true,
+      void_reason: reason,
+      voided_by: actor.userId ?? null,
+      voided_at: trx.fn.now(),
+    });
+
+    // Dated today, not on the bill date: the books record when the mistake was
+    // put right, and the bill's own period may since have been closed.
+    const today = new Date().toISOString().slice(0, 10);
+    await postReversal(
+      trx,
+      { referenceType: "purchase", referenceId: id },
+      today,
+      `Void of purchase bill ${existing.bill_no}`,
+      actor,
+    );
+
+    for (const piece of pieces as any[]) {
+      // Already taken off as a mis-entry on its own: its outbound row exists.
+      if (piece.status === "voided") continue;
+      await trx("jewelries").where({ id: piece.id }).update({ status: "voided" });
+      await trx("inventory_transactions").insert({
+        jewelry_id: piece.id,
+        type: "adjustment",
+        direction: "out",
+        quantity: 1,
+        cost_amount: piece.cost_price ?? null,
+        reference_type: "purchase",
+        reference_id: id,
+        note: `Bill ${existing.bill_no} voided: ${reason}`,
+        created_by: actor.userId ?? null,
+      });
+    }
+
+    await writeAuditLog(trx, {
+      ...actor,
+      action: "void",
+      entityType: "purchases",
+      entityId: id,
+      oldValues: { is_void: false },
+      newValues: { is_void: true, void_reason: reason, pieces_removed: (pieces as any[]).map((p) => p.id) },
+    });
+  });
+
+  return getPurchase(id);
 };

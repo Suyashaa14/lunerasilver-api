@@ -138,6 +138,7 @@ export const agedPayables = async (asOf?: string) => {
   const rows = await db("purchases as p")
     .join("suppliers as s", "s.id", "p.supplier_id")
     .whereNot("p.payment_status", "paid")
+    .where("p.is_void", false)
     .where("p.bill_date", "<=", cutoff)
     .select("p.id", "p.bill_no", "p.bill_date", "p.bill_date_bs", "p.total_amount", "p.payment_status", "s.name as supplier")
     .orderBy("p.bill_date", "asc");
@@ -227,6 +228,7 @@ export const salesRegister = async (range: Range) => {
 export const purchaseRegister = async (range: Range) => {
   const query = db("purchases as p")
     .join("suppliers as s", "s.id", "p.supplier_id")
+    .where("p.is_void", false)
     .orderBy("p.bill_date", "asc")
     .select("p.bill_no", "p.bill_date_bs", "p.fiscal_year", "p.taxable_amount", "p.vat_amount",
             "p.tds_amount", "p.total_amount", "s.name as supplier", "s.pan as supplier_pan");

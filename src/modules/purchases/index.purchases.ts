@@ -49,7 +49,32 @@ router.get("/:id", asyncHandler(async (req: Request, res: Response) => {
   res.json(purchase);
 }));
 
-// No update and no delete: a supplier bill is evidence. Correct it with a
-// further bill or a note from the supplier.
+// Only the parts that carry no money: the note and the payment. A figure that
+// was wrong is corrected by voiding the bill and entering it again.
+const detailsValidator = [
+  body("notes").optional({ values: "null" }).isString().isLength({ max: 2000 }),
+  body("paymentStatus").optional().isIn(["unpaid", "partial", "paid"]),
+  body("paymentMethod").optional({ values: "falsy" }).isIn(["cash", "cod", "esewa_qr", "bank_transfer", "card"]),
+];
+
+router.patch("/:id", detailsValidator, asyncHandler(async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ status: false, errors: errors.array() });
+  const purchase = await provider.updatePurchaseDetails(Number(req.params.id), req.body, auditActor(req));
+  if (!purchase) return res.status(404).json({ status: false, message: "Purchase not found" });
+  res.json(purchase);
+}));
+
+// Never deleted. Voiding keeps the bill, reverses its books and takes its
+// pieces off the shelf -- owner only, like the other cancellations.
+router.post("/:id/void", authenticateAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+  if (reason.length === 0) {
+    return res.status(400).json({ status: false, message: "A reason is required to void a bill" });
+  }
+  const purchase = await provider.voidPurchase(Number(req.params.id), reason, auditActor(req));
+  if (!purchase) return res.status(404).json({ status: false, message: "Purchase not found" });
+  res.json(purchase);
+}));
 
 export default router;
