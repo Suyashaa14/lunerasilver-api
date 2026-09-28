@@ -1,3 +1,4 @@
+import type { Knex } from "knex";
 import db from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
 import { stampForDate } from "../../utils/fiscalYear";
@@ -5,6 +6,14 @@ import { postPurchase, postReversal } from "../ledger/provider.posting";
 import { computeCost } from "../../utils/pricing";
 
 const money = (n: number) => Math.round(n * 100) / 100;
+
+/** YYYY-MM-DD in the shop's own time zone. The driver hands DATE columns back
+    as local-midnight Date objects, and toISOString would shift them a day back. */
+const localDate = (value: Date | string = new Date()): string => {
+  if (typeof value === "string") return value.slice(0, 10);
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+};
 
 /**
  * What one line of the bill costs.
@@ -82,6 +91,10 @@ export interface CreatePurchasePayload {
   paymentStatus?: "unpaid" | "partial" | "paid";
   notes?: string | null;
   items: PurchaseLine[];
+  /** When this bill number is already entered for the supplier, add these
+      lines to it instead of refusing. Used when old bills are typed in piece
+      by piece at the till. */
+  addToExisting?: boolean;
 }
 
 export const getPurchase = async (id: number) => {
@@ -144,12 +157,14 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
     const supplier = await trx("suppliers").where({ id: payload.supplierId }).first();
     if (!supplier) throw Object.assign(new Error("Supplier not found"), { status: 404 });
 
-    // Unique per (supplier, bill_no) in the schema. Caught here so the message
-    // explains itself rather than surfacing a constraint error.
     // A voided bill no longer stands, so its number is free for the corrected one.
     const duplicate = await trx("purchases")
       .where({ supplier_id: payload.supplierId, bill_no: payload.billNo, is_void: false })
-      .first("id");
+      .forUpdate()
+      .first();
+    if (duplicate && payload.addToExisting) {
+      return appendLines(trx, duplicate, supplier, payload.items, actor);
+    }
     if (duplicate) {
       throw Object.assign(
         new Error(`Bill ${payload.billNo} from ${supplier.name} is already entered`),
@@ -158,11 +173,6 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
     }
 
     const { fiscalYear, bsDate } = await stampForDate(trx, payload.billDate);
-
-    // PAN only means VAT on a bill is never coming back, so it is part of what
-    // the piece cost. Registered, it is reclaimable and stays out of the cost.
-    const business = await trx("business_profile").first("is_vat_registered");
-    const vatReclaimable = Boolean(business?.is_vat_registered);
 
     const subtotal = money(payload.items.reduce((s, i) => s + costOfLine(i), 0));
     const discount = money(payload.discount ?? 0);
@@ -188,68 +198,7 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
       created_by: actor.userId ?? null,
     });
 
-    for (const line of payload.items) {
-      const unitCost = costOfLine(line);
-      const lineVat = line.vatAmount ?? 0;
-      const lineTotal = money(unitCost + lineVat);
-      // The landed cost every margin is measured against.
-      const landedCost = money(vatReclaimable ? unitCost : unitCost + lineVat);
-
-      let jewelryId: number | null = null;
-      if (line.stockIn) {
-        const sku = line.stockIn.sku ?? `${line.stockIn.category.slice(0, 3).toUpperCase()}-${Date.now()}${Math.floor(Math.random() * 100)}`;
-        const [pieceId] = await trx("jewelries").insert({
-          sku,
-          name: line.stockIn.name,
-          category: line.stockIn.category,
-          material: line.stockIn.material ?? "silver",
-          purity: line.stockIn.purity ?? null,
-          silver_weight_grams: line.stockIn.silverWeightGrams,
-          making_charge: line.stockIn.makingCharge,
-          stone_weight_grams: line.stockIn.stoneWeightGrams ?? null,
-          stone_price: line.stockIn.stonePrice ?? null,
-          cost_price: landedCost,
-          // The rate actually paid. Keeping it is what lets the piece explain
-          // its own cost later, instead of asking anyone to trust the total.
-          cost_rate_per_gram: line.stockIn.ratePerGram ?? line.ratePerGram ?? null,
-          profit_amount: line.stockIn.profitAmount ?? 0,
-          status: "available",
-        });
-        jewelryId = pieceId as number;
-      }
-
-      const [lineId] = await trx("purchase_items").insert({
-        purchase_id: newId,
-        jewelry_id: jewelryId,
-        description: line.description,
-        material: line.material ?? null,
-        weight_grams: line.weightGrams ?? line.stockIn?.silverWeightGrams ?? null,
-        rate_per_gram: line.ratePerGram ?? line.stockIn?.ratePerGram ?? null,
-        quantity: 1,
-        unit_cost: money(unitCost),
-        taxable_amount: money(unitCost),
-        vat_amount: money(line.vatAmount ?? 0),
-        line_total: lineTotal,
-      });
-
-      if (jewelryId) {
-        // Close the loop back to the bill line, so the piece can always show
-        // where it came from and what it cost.
-        await trx("jewelries").where({ id: jewelryId }).update({ purchase_item_id: lineId });
-
-        await trx("inventory_transactions").insert({
-          jewelry_id: jewelryId,
-          type: "purchase",
-          direction: "in",
-          quantity: 1,
-          cost_amount: landedCost,
-          reference_type: "purchase",
-          reference_id: newId,
-          note: `${supplier.name} bill ${payload.billNo}`,
-          created_by: actor.userId ?? null,
-        });
-      }
-    }
+    await insertLines(trx, newId as number, supplier.name, payload.billNo, payload.items, actor);
 
     await postPurchase(trx, {
       id: newId, bill_no: payload.billNo, bill_date: payload.billDate,
@@ -269,6 +218,132 @@ export const createPurchase = async (payload: CreatePurchasePayload, actor: Audi
   });
 
   return getPurchase(purchaseId);
+};
+
+/**
+ * Writes a bill's lines, and books each stock line in as a piece with its
+ * landed cost and one inbound stock row.
+ */
+const insertLines = async (
+  trx: Knex.Transaction,
+  purchaseId: number,
+  supplierName: string,
+  billNo: string,
+  items: PurchaseLine[],
+  actor: AuditActor,
+) => {
+  // PAN only means VAT on a bill is never coming back, so it is part of what
+  // the piece cost. Registered, it is reclaimable and stays out of the cost.
+  const business = await trx("business_profile").first("is_vat_registered");
+  const vatReclaimable = Boolean(business?.is_vat_registered);
+
+  for (const line of items) {
+    const unitCost = costOfLine(line);
+    const lineVat = line.vatAmount ?? 0;
+    const lineTotal = money(unitCost + lineVat);
+    // The landed cost every margin is measured against.
+    const landedCost = money(vatReclaimable ? unitCost : unitCost + lineVat);
+
+    let jewelryId: number | null = null;
+    if (line.stockIn) {
+      const sku = line.stockIn.sku ?? `${line.stockIn.category.slice(0, 3).toUpperCase()}-${Date.now()}${Math.floor(Math.random() * 100)}`;
+      const [pieceId] = await trx("jewelries").insert({
+        sku,
+        name: line.stockIn.name,
+        category: line.stockIn.category,
+        material: line.stockIn.material ?? "silver",
+        purity: line.stockIn.purity ?? null,
+        silver_weight_grams: line.stockIn.silverWeightGrams,
+        making_charge: line.stockIn.makingCharge,
+        stone_weight_grams: line.stockIn.stoneWeightGrams ?? null,
+        stone_price: line.stockIn.stonePrice ?? null,
+        cost_price: landedCost,
+        // The rate actually paid. Keeping it is what lets the piece explain
+        // its own cost later, instead of asking anyone to trust the total.
+        cost_rate_per_gram: line.stockIn.ratePerGram ?? line.ratePerGram ?? null,
+        profit_amount: line.stockIn.profitAmount ?? 0,
+        status: "available",
+      });
+      jewelryId = pieceId as number;
+    }
+
+    const [lineId] = await trx("purchase_items").insert({
+      purchase_id: purchaseId,
+      jewelry_id: jewelryId,
+      description: line.description,
+      material: line.material ?? null,
+      weight_grams: line.weightGrams ?? line.stockIn?.silverWeightGrams ?? null,
+      rate_per_gram: line.ratePerGram ?? line.stockIn?.ratePerGram ?? null,
+      quantity: 1,
+      unit_cost: money(unitCost),
+      taxable_amount: money(unitCost),
+      vat_amount: money(line.vatAmount ?? 0),
+      line_total: lineTotal,
+    });
+
+    if (jewelryId) {
+      // Close the loop back to the bill line, so the piece can always show
+      // where it came from and what it cost.
+      await trx("jewelries").where({ id: jewelryId }).update({ purchase_item_id: lineId });
+
+      await trx("inventory_transactions").insert({
+        jewelry_id: jewelryId,
+        type: "purchase",
+        direction: "in",
+        quantity: 1,
+        cost_amount: landedCost,
+        reference_type: "purchase",
+        reference_id: purchaseId,
+        note: `${supplierName} bill ${billNo}`,
+        created_by: actor.userId ?? null,
+      });
+    }
+  }
+};
+
+/**
+ * Adds lines to a bill already entered.
+ *
+ * Old paper bills get typed in piece by piece, as each piece is sold -- so the
+ * second piece off bill 117 has to land on bill 117, not be refused as a
+ * duplicate. The added lines post their own ledger entry against the same bill,
+ * so voiding the bill still reverses everything it ever posted.
+ */
+const appendLines = async (
+  trx: Knex.Transaction,
+  bill: any,
+  supplier: any,
+  items: PurchaseLine[],
+  actor: AuditActor,
+) => {
+  const addedGoods = money(items.reduce((s, i) => s + costOfLine(i), 0));
+  const addedVat = money(items.reduce((s, i) => s + (i.vatAmount ?? 0), 0));
+  const added = money(addedGoods + addedVat);
+
+  await insertLines(trx, bill.id, supplier.name, bill.bill_no, items, actor);
+
+  await trx("purchases").where({ id: bill.id }).update({
+    subtotal: money(Number(bill.subtotal) + addedGoods),
+    taxable_amount: money(Number(bill.taxable_amount) + addedGoods),
+    vat_amount: money(Number(bill.vat_amount) + addedVat),
+    total_amount: money(Number(bill.total_amount) + added),
+  });
+
+  await postPurchase(trx, {
+    id: bill.id, bill_no: bill.bill_no, bill_date: localDate(bill.bill_date),
+    taxable_amount: addedGoods, vat_amount: addedVat, tds_amount: 0, total_amount: added,
+  }, actor);
+
+  await writeAuditLog(trx, {
+    ...actor,
+    action: "update",
+    entityType: "purchases",
+    entityId: bill.id,
+    oldValues: { total_amount: Number(bill.total_amount) },
+    newValues: { total_amount: money(Number(bill.total_amount) + added), lines_added: items.length },
+  });
+
+  return bill.id as number;
 };
 
 export const listPurchases = async (filters: { supplierId?: number; from?: string; to?: string }) => {
@@ -378,7 +453,7 @@ export const voidPurchase = async (id: number, reason: string, actor: AuditActor
 
     // Dated today, not on the bill date: the books record when the mistake was
     // put right, and the bill's own period may since have been closed.
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDate();
     await postReversal(
       trx,
       { referenceType: "purchase", referenceId: id },

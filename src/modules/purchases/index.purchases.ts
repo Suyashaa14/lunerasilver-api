@@ -27,6 +27,7 @@ const createValidator = [
   body("items.*.stockIn.category").optional({ values: "falsy" }).isString().trim().notEmpty(),
   body("items.*.stockIn.silverWeightGrams").optional({ values: "falsy" }).isFloat({ min: 0 }),
   body("items.*.stockIn.makingCharge").optional({ values: "falsy" }).isFloat({ min: 0 }),
+  body("addToExisting").optional().isBoolean(),
 ];
 
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
