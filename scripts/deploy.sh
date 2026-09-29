@@ -87,6 +87,8 @@ git_pull() {
 
 # cPanel's "Setup Node.js App" keeps node and npm in a virtual environment per
 # app. Use it when it is there, so npm installs into the app's own modules.
+USING_VENV=0
+
 use_node() {
   local activate
   activate="$(ls -d "$HOME_DIR"/nodevenv/lunerasilver-api/*/bin/activate 2>/dev/null | sort -V | tail -1 || true)"
@@ -99,6 +101,7 @@ use_node() {
     # shellcheck disable=SC1090
     source "$activate"
     set -eu
+    USING_VENV=1
     trap 'die "Stopped at line $LINENO: $BASH_COMMAND"' ERR
     ok "Using the cPanel Node environment ($(basename "$(dirname "$(dirname "$activate")")"))"
   fi
@@ -117,10 +120,28 @@ deploy_api() {
   use_node
 
   step "API: installing dependencies"
+  # cPanel keeps the app's packages in its Node environment and wants
+  # node_modules to be a link to them. A real folder there -- left by an
+  # "npm install" run outside that environment -- makes its npm refuse to run.
+  # It is moved aside, not deleted, and put back if the install fails.
+  local moved=""
+  if (( USING_VENV )) && [[ -d node_modules && ! -L node_modules ]]; then
+    moved="node_modules.old-$(date +%Y%m%d-%H%M%S)"
+    mv node_modules "$moved"
+    warn "Moved a plain node_modules folder aside to $moved (cPanel needs a link there)"
+  fi
+
   # Dev dependencies too: the build (typescript) and the migrations (ts-node)
   # both need them on the server.
-  npm install --include=dev --no-audit --no-fund --loglevel=error
+  if ! npm install --include=dev --no-audit --no-fund --loglevel=error; then
+    if [[ -n "$moved" && ! -e node_modules ]]; then
+      mv "$moved" node_modules
+      warn "Put the old node_modules folder back"
+    fi
+    die "npm install failed. In cPanel open 'Setup Node.js App', check the app for $API_DIR exists, press 'Run NPM Install', then run this again."
+  fi
   ok "Dependencies installed"
+  [[ -n "$moved" ]] && ok "Once the site works, delete the old folder: rm -rf $API_DIR/$moved"
 
   step "API: linking migrations"
   npm run --silent link-migrations >/dev/null
