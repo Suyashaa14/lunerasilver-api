@@ -6,10 +6,11 @@
 #   bash ~/lunerasilver-api/scripts/deploy.sh --api-only
 #   bash ~/lunerasilver-api/scripts/deploy.sh --web-only
 #   bash ~/lunerasilver-api/scripts/deploy.sh --skip-backup   # not recommended
+#   bash ~/lunerasilver-api/scripts/deploy.sh --debug         # print every command as it runs
 #
 # API:  git pull -> npm install -> link migrations -> list -> (backup) -> migrate
 #       -> safe seeds -> build -> restart
-# Web:  git pull -> copy dist/ into public_html
+# Web:  git pull -> copy dist/ into public_html (nothing there is deleted)
 #
 # Stops at the first thing that fails, so a half-finished deploy never carries
 # on as if it had worked.
@@ -42,7 +43,8 @@ for arg in "$@"; do
     --api-only) DO_WEB=0 ;;
     --web-only) DO_API=0 ;;
     --skip-backup) DO_BACKUP=0 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    --debug) set -x ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -89,8 +91,15 @@ use_node() {
   local activate
   activate="$(ls -d "$HOME_DIR"/nodevenv/lunerasilver-api/*/bin/activate 2>/dev/null | sort -V | tail -1 || true)"
   if [[ -n "$activate" ]]; then
+    # cPanel's activate script runs small checks of its own that can "fail"
+    # harmlessly. Under this script's stop-on-any-failure rules those would end
+    # the deploy, so the rules are relaxed just while it loads.
+    trap - ERR
+    set +eu
     # shellcheck disable=SC1090
-    set +u; source "$activate"; set -u
+    source "$activate"
+    set -eu
+    trap 'die "Stopped at line $LINENO: $BASH_COMMAND"' ERR
     ok "Using the cPanel Node environment ($(basename "$(dirname "$(dirname "$activate")")"))"
   fi
   command -v node >/dev/null || die "node is not available. In cPanel open 'Setup Node.js App', create the app for $API_DIR, then run again."
@@ -199,9 +208,9 @@ deploy_web() {
   [[ -f "$dist/index.html" ]] || die "$dist/index.html is missing. Build the website on your computer (npm run build), commit dist/, push, then run again."
 
   step "Web: publishing dist/ into $PUBLIC_DIR"
-  # Asset file names change with every build, so the old folder is replaced
-  # rather than added to -- otherwise public_html fills with dead files.
-  rm -rf "$PUBLIC_DIR/assets"
+  # Copied over the top; nothing already in public_html is removed. Old asset
+  # files from earlier builds stay behind -- harmless, index.html no longer
+  # points at them.
   cp -R "$dist/." "$PUBLIC_DIR/"
   ok "Copied $(find "$dist" -type f | wc -l | tr -d ' ') files"
 
