@@ -72,8 +72,19 @@ fi
 
 git_pull() {
   local dir="$1"
+  # A folder of build output that may be put back from git if it was changed
+  # on the server. Anything else changed there stops the deploy.
+  local restorable="${2:-}"
   cd "$dir"
   [[ -d .git ]] || die "$dir is not a git checkout"
+  if [[ -n "$restorable" ]]; then
+    local changed
+    changed="$(git status --porcelain --untracked-files=no)"
+    if [[ -n "$changed" ]] && ! echo "$changed" | grep -qvE "^.. ${restorable}/"; then
+      git checkout -- "$restorable"
+      warn "Put $restorable/ back from git (it had been moved or changed on the server)"
+    fi
+  fi
   if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     git status --short --untracked-files=no
     die "$dir has local changes on the server. Commit or discard them first (git checkout -- <file>), then run again."
@@ -223,7 +234,9 @@ deploy_api() {
 # ===================================================================== Web ==
 deploy_web() {
   step "Web: pulling the latest code"
-  git_pull "$WEB_REPO"
+  # Earlier deploys moved the files out of dist/ instead of copying them, which
+  # git sees as deleted. They are build output, so they are simply restored.
+  git_pull "$WEB_REPO" dist
 
   local dist="$WEB_REPO/dist"
   [[ -f "$dist/index.html" ]] || die "$dist/index.html is missing. Build the website on your computer (npm run build), commit dist/, push, then run again."
