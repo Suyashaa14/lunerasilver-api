@@ -20,8 +20,9 @@ export interface OldSaleLine {
   weightGrams: number;
   /** What the line was sold for, before the bill's discount. */
   amount: number;
-  /** What the shop paid for the whole line, when it is known. */
-  costAmount?: number | null;
+  /** The making charge the shop paid its supplier for the line. With the
+      silver at that day's rate it gives the line's cost. */
+  makingCharge?: number | null;
 }
 
 export interface OldSalePayload {
@@ -37,6 +38,9 @@ export interface OldSalePayload {
   /** Whether the buyer paid the final total then. Usually yes. */
   paid?: boolean;
   discount?: number;
+  /** The final figure on the bill, as the screen showed it. When given, the
+      saved total is held to it exactly; a rounding cent lands in the levy. */
+  finalTotal?: number | null;
   items: OldSaleLine[];
 }
 
@@ -58,10 +62,11 @@ const splitDiscount = (amounts: number[], discount: number): number[] => {
  * Logs a sale made before the system, from its paper bill.
  *
  * The old bill knows what was sold, the weight, the amount, the discount and
- * what the buyer paid. What the shop paid for it is typed in when it is known;
- * when it is not, the piece has no cost price, which every margin report
- * already shows as "not set" rather than a guess. Each line becomes a piece
- * that arrives and leaves at once.
+ * what the buyer paid. The cost of a line is its silver at that day's rate plus
+ * the making charge the shop paid, when the making charge is typed in; without
+ * it the piece has no cost price, which every margin report already shows as
+ * "not set" rather than a guess. Each line becomes a piece that arrives and
+ * leaves at once.
  *
  * A known cost is booked twice, both against this invoice so a void reverses
  * both: the piece coming into stock as opening stock the owner already held
@@ -75,12 +80,10 @@ const splitDiscount = (amounts: number[], discount: number): number[] => {
  * The two never collide -- the system's numbers carry the INV-<year>- prefix.
  * is_old_bill marks it.
  *
- * The skill-promotion levy is charged on old bills too, even though the paper
- * never showed it -- but taken out of what the buyer paid, not added on top.
- * The final total stays exactly the figure on the bill; the goods, the levy
- * (and VAT, once registered) are the parts it splits into:
+ * The skill-promotion levy is charged on old bills the same way as on a sale
+ * today, on top of the goods after discount:
  *
- *   goods = paid / (1 + VAT% + levy%),  levy = goods x levy%,  VAT = the rest
+ *   final = (lines - discount) + levy%   (+ VAT%, once registered)
  *
  * One transaction for the pieces, the invoice, its lines, the stock rows and
  * the ledger entry.
@@ -128,27 +131,43 @@ export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => 
 
     const { fiscalYear, bsDate } = await stampForDate(trx, payload.date);
 
-    // Both come out of what the buyer paid rather than going on top of it.
+    // On top of the goods, as on any sale.
     const vatRate = business.is_vat_registered ? Number(business.default_vat_rate) : 0;
     const levyRate = Number(business.skill_promo_rate ?? 0);
 
-    const paidPerLine = amounts.map((a, i) => money(a - shares[i]));
-    const paidTotal = money(paidPerLine.reduce((a, b) => a + b, 0));
-    const goodsTotal = money(paidTotal / (1 + (vatRate + levyRate) / 100));
-    const levyAmount = vatRate > 0 ? money((goodsTotal * levyRate) / 100) : money(paidTotal - goodsTotal);
-    const vatTotal = money(paidTotal - goodsTotal - levyAmount);
-
-    // The goods split over the lines by what each was paid; the last line takes
-    // the rounding, so the lines add back to exactly the goods total.
-    const goodsPerLine = paidPerLine.map((p) => (paidTotal > 0 ? money((p * goodsTotal) / paidTotal) : 0));
-    goodsPerLine[goodsPerLine.length - 1] = money(
-      goodsTotal - goodsPerLine.slice(0, -1).reduce((a, b) => a + b, 0),
-    );
+    const goodsPerLine = amounts.map((a, i) => money(a - shares[i]));
+    const goodsTotal = money(goodsPerLine.reduce((a, b) => a + b, 0));
     const vatPerLine = goodsPerLine.map((g) => money((g * vatRate) / 100));
-    vatPerLine[vatPerLine.length - 1] = money(vatTotal - vatPerLine.slice(0, -1).reduce((a, b) => a + b, 0));
+    const vatTotal = money(vatPerLine.reduce((a, b) => a + b, 0));
+    let levyAmount = money((goodsTotal * levyRate) / 100);
+
+    // A line amount worked back from the final total can leave the sum a cent
+    // off it. The bill's figure is the one the buyer paid, so the cent goes to
+    // the levy; anything bigger is a real disagreement and is refused.
+    if (payload.finalTotal) {
+      const drift = money(money(payload.finalTotal) - (goodsTotal + vatTotal + levyAmount));
+      if (Math.abs(drift) > 0.05) {
+        throw Object.assign(
+          new Error(`The final total ${money(payload.finalTotal)} does not match the lines less discount plus levy (${money(goodsTotal + vatTotal + levyAmount)}).`),
+          { status: 400 },
+        );
+      }
+      levyAmount = money(levyAmount + drift);
+    }
+
+    // Cost is the silver at that day's rate plus the making charge paid.
+    const costs = payload.items.map((i) => {
+      if (!i.makingCharge || i.makingCharge <= 0) return null;
+      if (!rate) {
+        throw Object.assign(
+          new Error(`${i.name}: enter the silver rate for that day, so its cost can be worked out.`),
+          { status: 400 },
+        );
+      }
+      return money(i.weightGrams * rate + i.makingCharge);
+    });
 
     const rows: any[] = [];
-    const costs = payload.items.map((i) => (i.costAmount && i.costAmount > 0 ? money(i.costAmount) : null));
     for (const [index, line] of payload.items.entries()) {
       const qty = Math.max(1, Math.floor(line.quantity || 1));
       const taxable = goodsPerLine[index];
@@ -161,7 +180,9 @@ export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => 
         category: line.category || "other",
         material: "silver",
         silver_weight_grams: line.weightGrams,
-        making_charge: 0,
+        making_charge: line.makingCharge && line.makingCharge > 0 ? money(line.makingCharge) : 0,
+        // The rate the cost was worked at, so the piece can explain it.
+        cost_rate_per_gram: costs[index] !== null ? rate : null,
         // Left empty when the bill does not say, never a made-up figure.
         cost_price: costs[index],
         profit_amount: 0,
@@ -189,7 +210,7 @@ export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => 
           image_snapshot: null,
           silver_weight_snapshot: line.weightGrams,
           silver_rate_snapshot: rate,
-          making_charge_snapshot: null,
+          making_charge_snapshot: line.makingCharge && line.makingCharge > 0 ? money(line.makingCharge) : null,
           stone_weight_snapshot: null,
           stone_price_snapshot: null,
           quantity: qty,
@@ -204,8 +225,7 @@ export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => 
 
     const subtotal = goodsTotal;
     const vatAmount = vatTotal;
-    // Always the bill's own final figure.
-    const totalAmount = paidTotal;
+    const totalAmount = money(goodsTotal + vatTotal + levyAmount);
 
     const [newId] = await trx("invoices").insert({
       invoice_no: invoiceNo,

@@ -48,7 +48,7 @@ export const fetchInvoices = async (filters: DateRangeFilters): Promise<InvoiceR
   const query = db("invoices as i")
     .where("i.is_void", false)
     .where("i.series", "SALES")
-    .select("i.id", "i.issued_at", "i.total_amount")
+    .select("i.id", "i.issued_at", "i.total_amount", "i.taxable_amount")
     .select(
       db.raw(
         `COALESCE((SELECT SUM(it.cost_amount) FROM inventory_transactions it
@@ -62,6 +62,12 @@ export const fetchInvoices = async (filters: DateRangeFilters): Promise<InvoiceR
                    WHERE cn.invoice_id = i.id), 0) AS credited`,
       ),
     )
+    .select(
+      db.raw(
+        `COALESCE((SELECT SUM(cn.taxable_amount) FROM credit_notes cn
+                   WHERE cn.invoice_id = i.id), 0) AS credited_goods`,
+      ),
+    )
     .orderBy("i.issued_at", "desc")
     .orderBy("i.id", "desc");
 
@@ -72,13 +78,17 @@ export const fetchInvoices = async (filters: DateRangeFilters): Promise<InvoiceR
 
   return rows.map((row: any) => {
     const revenue = Number(row.total_amount) - Number(row.credited);
+    // What the shop earned is the jewellery alone. The skill-promotion levy and
+    // any VAT in the total are collected for the government and paid onward,
+    // so they are left out of the margin even though the buyer paid them.
+    const goods = Number(row.taxable_amount) - Number(row.credited_goods);
     const cost = Number(row.cogs);
     return {
       id: row.id,
       issuedAt: new Date(row.issued_at).toISOString(),
       revenue,
       cost,
-      profit: revenue - cost,
+      profit: goods - cost,
     };
   });
 };

@@ -42,5 +42,6 @@ export const oldSaleValidator: ValidationChain[] = [
   body("items.*.quantity").isInt({ min: 1 }).withMessage("Quantity must be at least 1"),
   body("items.*.weightGrams").isFloat({ min: 0 }).withMessage("Each line needs a weight"),
   body("items.*.amount").isFloat({ gt: 0 }).withMessage("Each line needs an amount"),
-  body("items.*.costAmount").optional({ values: "null" }).isFloat({ min: 0 }).withMessage("What you paid must be a number"),
+  body("items.*.makingCharge").optional({ values: "null" }).isFloat({ min: 0 }).withMessage("Making charge must be a number"),
+  body("finalTotal").optional({ values: "null" }).isFloat({ gt: 0 }),
 ];
