@@ -1,6 +1,7 @@
 import type { Knex } from "knex";
 import db from "../../utils/db";
 import { uploadImageBuffer } from "../../utils/cloudinary";
+import { fetchNepalSilverRateOn } from "./silverRateSync";
 
 /**
  * The live silver rate is the open row in silver_rates -- the one with no
@@ -78,6 +79,50 @@ const recordSilverRate = async (ratePerGram: number, source: "manual" | "auto", 
 
 export const updateSilverRate = async (silverRatePerGram: number, createdBy?: number) =>
   recordSilverRate(silverRatePerGram, "manual", createdBy);
+
+/**
+ * The silver rate that applied on a past day.
+ *
+ * The shop's own rate history comes first: it is the rate the shop actually
+ * priced at. Before that history begins, FENEGOSIDA's published rate for the
+ * day -- from the saved list (silver_rate_reference, seeded back to 1 Jan
+ * 2026), else from its live API. With none, null -- the caller asks for it to
+ * be typed in rather than being handed a guess.
+ */
+export const getSilverRateOn = async (date: string) => {
+  const endOfDay = `${date} 23:59:59`;
+  const first = await db("silver_rates").orderBy("effective_from", "asc").first("effective_from");
+  if (first && new Date(first.effective_from) <= new Date(`${date}T23:59:59`)) {
+    const row = await db("silver_rates")
+      .where("effective_from", "<=", endOfDay)
+      .andWhere((q) => q.whereNull("effective_to").orWhere("effective_to", ">", endOfDay))
+      .orderBy("effective_from", "desc")
+      .first("rate_per_gram");
+    if (row) return { ratePerGram: Number(row.rate_per_gram), source: "shop" as const, day: date };
+  }
+
+  // The saved FENEGOSIDA list, which reaches back further than the live API.
+  // A closed market day takes the last rate before it, but never one more
+  // than a few days old.
+  const earliest = new Date(`${date}T00:00:00`);
+  earliest.setDate(earliest.getDate() - 5);
+  const pad = (x: number) => String(x).padStart(2, "0");
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const saved = await db("silver_rate_reference")
+    .where("rate_date", "<=", date)
+    .andWhere("rate_date", ">=", ymd(earliest))
+    .orderBy("rate_date", "desc")
+    .first("rate_date", "npr_per_gram_999");
+  if (saved) {
+    return { ratePerGram: Number(saved.npr_per_gram_999), source: "fenegosida" as const, day: ymd(new Date(saved.rate_date)) };
+  }
+
+  // Newer than the saved list: ask FENEGOSIDA directly.
+  const published = await fetchNepalSilverRateOn(date);
+  if (published) return { ratePerGram: published.ratePerGram, source: "fenegosida" as const, day: published.day };
+
+  return { ratePerGram: null, source: null, day: date };
+};
 
 export const applyAutoSilverRate = async (silverRatePerGram: number) =>
   recordSilverRate(silverRatePerGram, "auto");

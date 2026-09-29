@@ -23,3 +23,24 @@ export const creditNoteValidator: ValidationChain[] = [
   body("refund.amount").optional({ values: "falsy" }).isFloat({ gt: 0 }),
   body("refund.method").optional({ values: "falsy" }).isIn(["cash", "esewa_qr", "bank_transfer", "card"]),
 ];
+
+/** A sale from before the system, typed in from its paper bill. */
+export const oldSaleValidator: ValidationChain[] = [
+  body("billNo").isString().trim().notEmpty().withMessage("The old bill number is required")
+    .isLength({ max: 32 }).withMessage("Bill number is too long"),
+  body("date").isISO8601().withMessage("The bill date is required"),
+  body("paymentMethod").isIn(["cash", "cod", "esewa_qr", "bank_transfer"]),
+  body("paid").optional().isBoolean(),
+  body("discount").optional({ values: "falsy" }).isFloat({ min: 0 }),
+  body("customer.name").optional({ values: "falsy" }).isString().trim(),
+  body("customer.phone").optional({ values: "falsy" }).isString().trim(),
+  body("location").optional({ values: "falsy" }).isString().trim().isLength({ max: 190 }),
+  body("silverRatePerGram").optional({ values: "falsy" }).isFloat({ min: 0 }),
+  body("items").isArray({ min: 1 }).withMessage("At least one line is required"),
+  body("items.*.name").isString().trim().notEmpty().withMessage("Each line needs a piece name"),
+  body("items.*.category").optional({ values: "falsy" }).isString(),
+  body("items.*.quantity").isInt({ min: 1 }).withMessage("Quantity must be at least 1"),
+  body("items.*.weightGrams").isFloat({ min: 0 }).withMessage("Each line needs a weight"),
+  body("items.*.amount").isFloat({ gt: 0 }).withMessage("Each line needs an amount"),
+  body("items.*.costAmount").optional({ values: "null" }).isFloat({ min: 0 }).withMessage("What you paid must be a number"),
+];

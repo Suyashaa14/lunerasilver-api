@@ -8,6 +8,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 const router = express.Router();
 
 router.get("/", asyncHandler(controller.getSettings));
+router.get("/silver-rate/on", asyncHandler(controller.getSilverRateOn));
 router.put(
   "/silver-rate",
   authenticateAdmin,

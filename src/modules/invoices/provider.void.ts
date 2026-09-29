@@ -43,7 +43,12 @@ export const voidInvoice = async (
     const lines = await trx("invoice_items").where({ invoice_id: id }).select("jewelry_id");
     const pieceIds = lines.map((l: any) => l.jewelry_id).filter((v: number | null) => v !== null);
 
-    if (pieceIds.length > 0) {
+    if (pieceIds.length > 0 && existing.is_old_bill) {
+      // A logged old sale made its pieces only to sell them. Cancelled, they
+      // were never stock, so they are marked a mis-entry -- not put back on a
+      // shelf they never stood on.
+      await trx("jewelries").whereIn("id", pieceIds).where({ status: "sold" }).update({ status: "voided" });
+    } else if (pieceIds.length > 0) {
       // Only pieces still marked sold by this invoice go back. One already
       // resold on a later document must not be pulled out from under it.
       await trx("jewelries").whereIn("id", pieceIds).where({ status: "sold" }).update({ status: "available" });

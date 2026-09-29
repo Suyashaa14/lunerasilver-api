@@ -1,6 +1,6 @@
 import express from "express";
 import * as controller from "./controller.invoices";
-import { issueInvoiceValidator, creditNoteValidator } from "./validator.invoices";
+import { issueInvoiceValidator, creditNoteValidator, oldSaleValidator } from "./validator.invoices";
 import { authenticateAdmin, authenticateStaff } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 
@@ -19,6 +19,8 @@ router.get("/monthly", asyncHandler(controller.getMonthlySeries));
 router.get("/by-category", asyncHandler(controller.getByCategory));
 router.get("/by-product", asyncHandler(controller.getByProduct));
 router.post("/", issueInvoiceValidator, asyncHandler(controller.issueInvoice));
+// Back-dated and outside the numbered series, so the owner's call, not the till's.
+router.post("/old", authenticateAdmin, oldSaleValidator, asyncHandler(controller.logOldSale));
 router.get("/:id", asyncHandler(controller.getInvoice));
 router.post("/:id/void", authenticateAdmin, asyncHandler(controller.voidInvoice));
 router.post("/:id/print", asyncHandler(controller.printInvoice));

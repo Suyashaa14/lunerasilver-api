@@ -41,3 +41,55 @@ export const syncSilverRateFromFenegosida = async () => {
   const ratePerGram = await fetchNepalSilverRatePerGram();
   return provider.applyAutoSilverRate(ratePerGram);
 };
+
+const FENEGOSIDA_MONTH_URL = "https://api.fenegosida.org/api/website/v1/Dashboard/monthwisehistory";
+
+interface FenegosidaDayRate {
+  todayDate: string;
+  rateType: string;
+  baseRatePerGram: number;
+}
+
+const fetchMonth = async (month: string): Promise<FenegosidaDayRate[]> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(`${FENEGOSIDA_MONTH_URL}?date=${month}`, { signal: controller.signal });
+    // 204: no history published for that month.
+    if (res.status === 204 || !res.ok) return [];
+    const text = await res.text();
+    return text ? (JSON.parse(text) as FenegosidaDayRate[]) : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const previousMonth = (month: string) => {
+  const [y, m] = month.split("-").map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+};
+
+/**
+ * FENEGOSIDA's published silver rate for a past day, per gram.
+ *
+ * The market does not publish on closed days (Saturdays, holidays), so a
+ * closed day takes the last rate published before it -- the one a shop would
+ * have been selling at. Its history only reaches back to late July 2026;
+ * earlier than that there is nothing to find and this returns null.
+ */
+export const fetchNepalSilverRateOn = async (date: string): Promise<{ ratePerGram: number; day: string } | null> => {
+  let month = date.slice(0, 7);
+  // The day itself, else earlier in its month, else the end of the month before.
+  for (let tries = 0; tries < 2; tries += 1) {
+    const rows = (await fetchMonth(month))
+      .filter((r) => r.rateType.includes("चाँदी") && r.rateType.includes("ग्राम"))
+      .filter((r) => r.todayDate.slice(0, 10) <= date && r.baseRatePerGram > 0)
+      .sort((a, b) => a.todayDate.localeCompare(b.todayDate));
+    const last = rows[rows.length - 1];
+    if (last) return { ratePerGram: Math.round((last.baseRatePerGram / 10) * 100) / 100, day: last.todayDate.slice(0, 10) };
+    month = previousMonth(month);
+  }
+  return null;
+};

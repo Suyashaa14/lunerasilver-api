@@ -27,3 +27,11 @@ export const updateEsewaQr = async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ status: false, message: "QR image file is required" });
   res.json(await provider.updateEsewaQr(req.file));
 };
+
+export const getSilverRateOn = async (req: Request, res: Response) => {
+  const date = String(req.query.date ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ status: false, message: "date must be YYYY-MM-DD" });
+  }
+  res.json(await provider.getSilverRateOn(date));
+};

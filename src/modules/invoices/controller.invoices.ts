@@ -4,6 +4,7 @@ import * as issuer from "./provider.issue";
 import * as voider from "./provider.void";
 import * as creditNotes from "./provider.creditNote";
 import * as analytics from "./provider.invoices";
+import * as oldSale from "./provider.oldSale";
 import { auditActor } from "../../utils/audit";
 
 export const issueInvoice = async (req: Request, res: Response) => {
@@ -14,6 +15,14 @@ export const issueInvoice = async (req: Request, res: Response) => {
 
   const invoice = await issuer.issueInvoice(req.body, auditActor(req));
   res.status(201).json(invoice);
+};
+
+export const logOldSale = async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ status: false, errors: errors.array() });
+  }
+  res.status(201).json(await oldSale.logOldSale(req.body, auditActor(req)));
 };
 
 export const getInvoice = async (req: Request, res: Response) => {
