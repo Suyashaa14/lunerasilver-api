@@ -141,7 +141,7 @@ deploy_api() {
     die "npm install failed. In cPanel open 'Setup Node.js App', check the app for $API_DIR exists, press 'Run NPM Install', then run this again."
   fi
   ok "Dependencies installed"
-  [[ -n "$moved" ]] && ok "Once the site works, delete the old folder: rm -rf $API_DIR/$moved"
+  if [[ -n "$moved" ]]; then ok "Once the site works, delete the old folder: rm -rf $API_DIR/$moved"; fi
 
   step "API: linking migrations"
   npm run --silent link-migrations >/dev/null
