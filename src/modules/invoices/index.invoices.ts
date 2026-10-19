@@ -21,13 +21,22 @@ router.get("/by-product", asyncHandler(controller.getByProduct));
 router.post("/", issueInvoiceValidator, asyncHandler(controller.issueInvoice));
 // Back-dated and outside the numbered series, so the owner's call, not the till's.
 router.post("/old", authenticateAdmin, oldSaleValidator, asyncHandler(controller.logOldSale));
+// Old bills are typed from paper, so unlike issued invoices they can be corrected
+// or removed. See provider.oldSale.ts for what that does to the books.
+router.get("/:id/old", authenticateAdmin, asyncHandler(controller.getOldSale));
+router.put("/:id/old", authenticateAdmin, oldSaleValidator, asyncHandler(controller.updateOldSale));
+router.delete("/:id/old", authenticateAdmin, asyncHandler(controller.deleteOldSale));
+router.get("/:id/edit", authenticateAdmin, asyncHandler(controller.getSaleForEdit));
+router.put("/:id", authenticateAdmin, issueInvoiceValidator, asyncHandler(controller.updateInvoice));
+router.delete("/:id", authenticateAdmin, asyncHandler(controller.deleteInvoice));
 router.get("/:id", asyncHandler(controller.getInvoice));
 router.post("/:id/void", authenticateAdmin, asyncHandler(controller.voidInvoice));
 router.post("/:id/print", asyncHandler(controller.printInvoice));
 router.post("/:id/credit-note", authenticateAdmin, creditNoteValidator, asyncHandler(controller.issueCreditNote));
 router.get("/credit-notes/:id", asyncHandler(controller.getCreditNote));
 
-// No update and no delete. Voiding and counting a print are the only changes
-// an issued invoice allows, and src/utils/writeGuards.ts enforces that.
+// Editing or deleting a sale replaces it through provider.amend.ts, which
+// reverses what it posted and keeps an audit copy. The write guards still stop
+// every other path from touching an issued invoice.
 
 export default router;

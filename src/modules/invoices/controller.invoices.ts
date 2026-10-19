@@ -5,6 +5,7 @@ import * as voider from "./provider.void";
 import * as creditNotes from "./provider.creditNote";
 import * as analytics from "./provider.invoices";
 import * as oldSale from "./provider.oldSale";
+import * as amend from "./provider.amend";
 import { auditActor } from "../../utils/audit";
 
 export const issueInvoice = async (req: Request, res: Response) => {
@@ -23,6 +24,50 @@ export const logOldSale = async (req: Request, res: Response) => {
     return res.status(400).json({ status: false, errors: errors.array() });
   }
   res.status(201).json(await oldSale.logOldSale(req.body, auditActor(req)));
+};
+
+export const getOldSale = async (req: Request, res: Response) => {
+  const bill = await oldSale.getOldSaleForEdit(Number(req.params.id));
+  if (!bill) return res.status(404).json({ status: false, message: "Old bill not found" });
+  res.json(bill);
+};
+
+export const updateOldSale = async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ status: false, errors: errors.array() });
+  }
+  const invoice = await oldSale.updateOldSale(Number(req.params.id), req.body, auditActor(req));
+  if (!invoice) return res.status(404).json({ status: false, message: "Old bill not found" });
+  res.json(invoice);
+};
+
+export const deleteOldSale = async (req: Request, res: Response) => {
+  const found = await oldSale.deleteOldSale(Number(req.params.id), auditActor(req));
+  if (!found) return res.status(404).json({ status: false, message: "Old bill not found" });
+  res.json({ status: true });
+};
+
+export const getSaleForEdit = async (req: Request, res: Response) => {
+  const sale = await amend.getSaleForEdit(Number(req.params.id));
+  if (!sale) return res.status(404).json({ status: false, message: "Sale not found" });
+  res.json(sale);
+};
+
+export const updateInvoice = async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ status: false, errors: errors.array() });
+  }
+  const invoice = await amend.updateInvoice(Number(req.params.id), req.body, auditActor(req));
+  if (!invoice) return res.status(404).json({ status: false, message: "Sale not found" });
+  res.json(invoice);
+};
+
+export const deleteInvoice = async (req: Request, res: Response) => {
+  const found = await amend.deleteInvoice(Number(req.params.id), auditActor(req));
+  if (!found) return res.status(404).json({ status: false, message: "Sale not found" });
+  res.json({ status: true });
 };
 
 export const getInvoice = async (req: Request, res: Response) => {

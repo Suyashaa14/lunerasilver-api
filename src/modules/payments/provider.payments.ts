@@ -89,7 +89,15 @@ const assertHasParent = (payload: { invoiceId?: number | null; orderId?: number 
   }
 };
 
-export const recordPayment = async (payload: RecordPaymentPayload, actor: AuditActor): Promise<PaymentDTO> => {
+/**
+ * `preVerified` is for money already confirmed when it is entered -- a paid old
+ * bill, whose payment was settled long ago. Never taken from a request body.
+ */
+export const recordPayment = async (
+  payload: RecordPaymentPayload,
+  actor: AuditActor,
+  opts: { preVerified?: boolean } = {},
+): Promise<PaymentDTO> => {
   assertHasParent(payload);
   if (payload.amount <= 0) {
     throw Object.assign(new Error("Use a refund to record money going back out"), { status: 400 });
@@ -98,6 +106,7 @@ export const recordPayment = async (payload: RecordPaymentPayload, actor: AuditA
   const id = await db.transaction(async (trx) => {
     const receivedAt = payload.receivedAt ?? new Date().toISOString().slice(0, 10);
     const { fiscalYear, bsDate } = await stampForDate(trx, receivedAt);
+    const status = opts.preVerified ? "verified" : initialStatus(payload.method);
 
     if (payload.invoiceId) {
       const invoice = await trx("invoices").where({ id: payload.invoiceId }).first("id", "is_void", "total_amount");
@@ -123,12 +132,12 @@ export const recordPayment = async (payload: RecordPaymentPayload, actor: AuditA
       amount: money(payload.amount),
       method: payload.method,
       reference_no: payload.referenceNo ?? null,
-      status: initialStatus(payload.method),
+      status: status,
       received_at: receivedAt,
       received_date_bs: bsDate,
       fiscal_year: fiscalYear,
-      verified_by: initialStatus(payload.method) === "verified" ? actor.userId ?? null : null,
-      verified_at: initialStatus(payload.method) === "verified" ? trx.fn.now() : null,
+      verified_by: status === "verified" ? actor.userId ?? null : null,
+      verified_at: status === "verified" ? trx.fn.now() : null,
       note: payload.note ?? null,
     });
 

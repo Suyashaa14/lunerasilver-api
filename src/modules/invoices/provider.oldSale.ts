@@ -1,8 +1,9 @@
-import db from "../../utils/db";
+import type { Knex } from "knex";
+import db, { unguardedDb } from "../../utils/db";
 import { writeAuditLog, AuditActor } from "../../utils/audit";
-import { stampForDate } from "../../utils/fiscalYear";
+import { stampForDate, assertFiscalYearOpen } from "../../utils/fiscalYear";
 import { findOrCreateByPhone } from "../customers/provider.customers";
-import { ACCOUNTS, postInvoice } from "../ledger/provider.posting";
+import { ACCOUNTS, postInvoice, postReversal } from "../ledger/provider.posting";
 import { postEntry } from "../ledger/provider.ledger";
 import { recordPayment } from "../payments/provider.payments";
 import { getInvoice } from "./provider.issue";
@@ -88,7 +89,7 @@ const splitDiscount = (amounts: number[], discount: number): number[] => {
  * One transaction for the pieces, the invoice, its lines, the stock rows and
  * the ledger entry.
  */
-export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => {
+const insertOldSale = async (trx: Knex.Transaction, payload: OldSalePayload, actor: AuditActor): Promise<number> => {
   const billNo = payload.billNo.trim();
   const invoiceNo = billNo;
   const location = payload.location?.trim() || null;
@@ -105,7 +106,7 @@ export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => 
   }
   const shares = splitDiscount(amounts, discountTotal);
 
-  const invoiceId = await db.transaction(async (trx) => {
+  {
     const taken = await trx("invoices").where({ invoice_no: invoiceNo }).first("id");
     if (taken) {
       throw Object.assign(new Error(`Bill ${billNo} is already entered`), { status: 409 });
@@ -295,19 +296,152 @@ export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => 
     });
 
     return newId as number;
-  });
+  }
+};
 
-  // Separate step, as at the counter: if it fails, the sale stands and the
-  // money can be recorded against it afterwards.
-  if (payload.paid !== false) {
-    const invoice = await getInvoice(invoiceId);
-    if (invoice && invoice.totalAmount > 0) {
-      await recordPayment({
-        invoiceId, amount: invoice.totalAmount, method: payload.paymentMethod,
-        receivedAt: payload.date, note: `Paid on old bill ${billNo}`,
-      } as any, actor);
-    }
+// Separate step, as at the counter: if it fails, the sale stands and the
+// money can be recorded against it afterwards. Already settled long ago, so
+// whatever the method it counts as paid at once, with no statement to match.
+const settleOldSale = async (invoiceId: number, payload: OldSalePayload, actor: AuditActor) => {
+  if (payload.paid === false) return;
+  const invoice = await getInvoice(invoiceId);
+  if (invoice && invoice.totalAmount > 0) {
+    await recordPayment({
+      invoiceId, amount: invoice.totalAmount, method: payload.paymentMethod,
+      receivedAt: payload.date, note: `Paid on old bill ${payload.billNo.trim()}`,
+    } as any, actor, { preVerified: true });
+  }
+};
+
+export const logOldSale = async (payload: OldSalePayload, actor: AuditActor) => {
+  const invoiceId = await db.transaction((trx) => insertOldSale(trx, payload, actor));
+  await settleOldSale(invoiceId, payload, actor);
+  return getInvoice(invoiceId);
+};
+
+/**
+ * What a saved old bill looked like when it was typed, in the shape the entry
+ * form takes -- so the form can be opened on it again to fix a slip.
+ */
+export const getOldSaleForEdit = async (id: number) => {
+  const inv = await db("invoices").where({ id, is_old_bill: true }).first();
+  if (!inv) return null;
+  const items = await db("invoice_items").where({ invoice_id: id }).orderBy("id");
+  const customer = await db("customers").where({ id: inv.customer_id }).first("name", "phone");
+  const paid = await db("payments").where({ invoice_id: id, status: "verified" }).sum({ s: "amount" }).first();
+  const walkIn = customer?.name === "Walk-in customer" && !customer?.phone;
+  const rate = items.find((i: any) => i.silver_rate_snapshot)?.silver_rate_snapshot ?? null;
+  return {
+    id: Number(inv.id),
+    billNo: inv.invoice_no as string,
+    date: String(inv.issued_at instanceof Date ? inv.issued_at.toISOString() : inv.issued_at).slice(0, 10),
+    buyerName: walkIn ? "" : (inv.buyer_name as string),
+    buyerPhone: walkIn ? "" : ((customer?.phone as string | null) ?? ""),
+    location: inv.buyer_address && inv.buyer_address !== "-" ? (inv.buyer_address as string) : "",
+    silverRatePerGram: rate === null ? null : Number(rate),
+    paymentMethod: inv.payment_method as string,
+    paid: Number(paid?.s ?? 0) > 0,
+    discount: Number(inv.discount),
+    finalTotal: Number(inv.total_amount),
+    isVoid: Boolean(inv.is_void),
+    items: items.map((i: any) => ({
+      name: i.name_snapshot as string,
+      category: (i.category_snapshot as string) ?? "other",
+      quantity: Number(i.quantity),
+      weightGrams: Number(i.silver_weight_snapshot ?? 0),
+      // What the line sold for before the bill's discount.
+      amount: money(Number(i.taxable_amount) + Number(i.discount)),
+      makingCharge: i.making_charge_snapshot === null ? null : Number(i.making_charge_snapshot),
+    })),
+  };
+};
+
+/**
+ * Takes an old bill out of the books completely, as if it had never been typed.
+ *
+ * Old bills are the one place the append-only rule bends: they are typed in by
+ * hand from paper, so a slip is likely, and the paper bill still exists as the
+ * real document. Voiding would leave the bill's number taken, and the corrected
+ * bill could not be entered under it. So the invoice, its lines, the pieces made
+ * for it, their stock rows and its payments are removed -- but what they posted
+ * to the ledger is reversed, not erased, and an audit row keeps a full copy.
+ *
+ * Uses the unguarded connection on purpose: the write guards exist to stop this
+ * very thing by accident, and this is the one place it is meant.
+ *
+ * Refused when a credit note hangs off it or its fiscal year is closed.
+ */
+const purgeOldSale = async (trx: Knex.Transaction, id: number, actor: AuditActor, why: string) => {
+  const inv = await trx("invoices").where({ id }).first();
+  if (!inv) throw Object.assign(new Error("Invoice not found"), { status: 404 });
+  if (!inv.is_old_bill) {
+    throw Object.assign(
+      new Error("Only a logged old bill can be edited or deleted. Correct an issued invoice with a credit note."),
+      { status: 409 },
+    );
+  }
+  await assertFiscalYearOpen(trx, inv.fiscal_year);
+
+  const notes = await trx("credit_notes").where({ invoice_id: id }).first("id");
+  if (notes) {
+    throw Object.assign(new Error("A credit note was issued against this bill, so it cannot be changed."), { status: 409 });
   }
 
-  return getInvoice(invoiceId);
+  const items = await trx("invoice_items").where({ invoice_id: id });
+  const payments = await trx("payments").where({ invoice_id: id });
+  const today = new Date().toISOString().slice(0, 10);
+  const narration = `${why} old bill ${inv.invoice_no}`;
+
+  // Reverse, never erase, what the ledger was told. A void already reversed the sale.
+  for (const p of payments as any[]) {
+    await postReversal(trx, { referenceType: "payment", referenceId: Number(p.id) }, today, narration, actor);
+  }
+  if (!inv.is_void) {
+    await postReversal(trx, { referenceType: "invoice", referenceId: id }, today, narration, actor);
+  }
+
+  const pieceIds = items.map((i: any) => i.jewelry_id).filter((v: number | null) => v !== null);
+  await trx("payments").where({ invoice_id: id }).del();
+  await trx("invoice_items").where({ invoice_id: id }).del();
+  if (pieceIds.length > 0) {
+    await trx("inventory_transactions").whereIn("jewelry_id", pieceIds).del();
+  }
+  await trx("invoices").where({ id }).del();
+  // Only the pieces this bill made for itself.
+  if (pieceIds.length > 0) {
+    await trx("jewelries").whereIn("id", pieceIds).where("sku", "like", "OLD-%").del();
+  }
+
+  await writeAuditLog(trx, {
+    ...actor,
+    action: "void",
+    entityType: "invoices",
+    entityId: id,
+    oldValues: { removed_old_bill: true, invoice: inv, items, payments },
+    newValues: { reason: why },
+  });
+};
+
+/** Deletes a logged old bill so it can be entered again, or not at all. */
+export const deleteOldSale = async (id: number, actor: AuditActor): Promise<boolean> => {
+  const exists = await db("invoices").where({ id }).first("id");
+  if (!exists) return false;
+  await unguardedDb.transaction((trx) => purgeOldSale(trx, id, actor, "Deleted"));
+  return true;
+};
+
+/**
+ * Corrects a logged old bill: the old version is taken out and the corrected
+ * one put in, in one transaction, so a bill that fails the checks is left
+ * exactly as it was. It may keep its bill number or take a new one.
+ */
+export const updateOldSale = async (id: number, payload: OldSalePayload, actor: AuditActor) => {
+  const exists = await db("invoices").where({ id }).first("id");
+  if (!exists) return null;
+  const newId = await unguardedDb.transaction(async (trx) => {
+    await purgeOldSale(trx, id, actor, "Replaced");
+    return insertOldSale(trx, payload, actor);
+  });
+  await settleOldSale(newId, payload, actor);
+  return getInvoice(newId);
 };

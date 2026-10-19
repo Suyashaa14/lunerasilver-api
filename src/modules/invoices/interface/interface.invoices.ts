@@ -58,6 +58,7 @@ export interface InvoiceDTO {
   totalAmount: number;
   paymentMethod: string;
   isVoid: boolean;
+  isOldBill: boolean;
   voidReason: string | null;
   printCount: number;
   items: InvoiceItemDTO[];

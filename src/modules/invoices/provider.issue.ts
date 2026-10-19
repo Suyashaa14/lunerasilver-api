@@ -75,6 +75,7 @@ const toDTO = (invoice: any, items: any[]): InvoiceDTO => ({
   totalAmount: Number(invoice.total_amount),
   paymentMethod: invoice.payment_method,
   isVoid: Boolean(invoice.is_void),
+  isOldBill: Boolean(invoice.is_old_bill),
   voidReason: invoice.void_reason,
   printCount: Number(invoice.print_count),
   items: items.map(itemToDTO),
@@ -101,11 +102,26 @@ export const getInvoice = async (id: number): Promise<InvoiceDTO | null> => {
  * the catalogue.
  */
 export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditActor): Promise<InvoiceDTO> => {
+  const invoiceId = await db.transaction((trx) => insertInvoice(trx, payload, actor));
+  return (await getInvoice(invoiceId))!;
+};
+
+/**
+ * The body of issuing, on the caller's transaction. `reuse` hands an invoice the
+ * number of the one it replaces (an edit), so a corrected sale keeps its place
+ * in the series -- used only when the corrected date is in the same fiscal year.
+ */
+export const insertInvoice = async (
+  trx: Knex.Transaction,
+  payload: IssueInvoicePayload,
+  actor: AuditActor,
+  reuse?: { invoiceNo: string; fiscalYear: string },
+): Promise<number> => {
   if (!payload.items || payload.items.length === 0) {
     throw Object.assign(new Error("An invoice needs at least one item"), { status: 400 });
   }
 
-  const invoiceId = await db.transaction(async (trx) => {
+  {
     const business = await trx("business_profile").first();
     if (!business) {
       throw Object.assign(
@@ -131,7 +147,9 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
     const issuedAt = payload.issuedAt ?? new Date().toISOString().slice(0, 10);
     // Refuses a closed fiscal year.
     const { fiscalYear, bsDate } = await stampForDate(trx, issuedAt);
-    const invoiceNo = await allocateNumber(trx, fiscalYear, "SALES");
+    const invoiceNo = reuse && reuse.fiscalYear === fiscalYear
+      ? reuse.invoiceNo
+      : await allocateNumber(trx, fiscalYear, "SALES");
 
     // Locked so two tills cannot sell the same piece. The second request waits
     // here, then finds the piece already sold and is refused.
@@ -275,10 +293,8 @@ export const issueInvoice = async (payload: IssueInvoicePayload, actor: AuditAct
       newValues: { invoice_no: invoiceNo, customer_id: customerId, total_amount: totalAmount },
     });
 
-    return newInvoiceId;
-  });
-
-  return (await getInvoice(invoiceId))!;
+    return newInvoiceId as number;
+  }
 };
 
 export interface InvoiceListFilters {
@@ -333,6 +349,7 @@ export const listInvoices = async (filters: InvoiceListFilters) => {
       outstanding: r.is_void ? 0 : Math.round((Number(r.total_amount) - Number(r.paid)) * 100) / 100,
       paymentMethod: r.payment_method,
       isVoid: Boolean(r.is_void),
+      isOldBill: Boolean(r.is_old_bill),
     })),
     total: Number((countRow as { c: number | string }).c),
     page: filters.page,
